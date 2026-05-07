@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+
+{% block title %}Sitios · Scraper Hub{% endblock %}
+{% block page_title %}Sitios Web{% endblock %}
+{% block page_sub %}Gestiona las páginas que se scrapean diariamente{% endblock %}
+
+{% block header_actions %}
+  <button onclick="document.getElementById('import_modal').style.display='flex'" class="btn-ghost">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    Importar lista
+  </button>
+  <button @click="$dispatch('open-modal')" class="btn-primary" x-data>
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Añadir Sitio
+  </button>
+  <form method="post" action="/scrape-all" x-data="{l:false}" @submit="l=true">
+    <button type="submit" class="btn-ghost" :class="l&&'opacity-60'">
+      <svg class="w-4 h-4" :class="l&&'animate-spin'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      <span x-text="l?'Scrapeando...':'Scrapar Todos'"></span>
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+
+<!-- Modal -->
+<div x-data="{ open: false }" @open-modal.window="open=true" x-cloak>
+  <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" @click="open=false"></div>
+    <div class="relative card w-full max-w-lg p-6 z-10" @click.stop>
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-base font-semibold text-gray-900">Añadir nuevo sitio</h2>
+        <button @click="open=false" class="text-gray-400 hover:text-gray-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <form method="post" action="/sites" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">Nombre del sitio *</label>
+          <input name="name" required placeholder="Ej: 2Playbook"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">URL *</label>
+          <input name="url" type="url" required placeholder="https://www.ejemplo.com"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">Selector CSS <span class="text-gray-400 font-normal">(opcional)</span></label>
+          <input name="css_selector" placeholder="Ej: .article-list, #news"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <p class="text-xs text-gray-400 mt-1">Limita el scraping a una sección específica de la página</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">Patrón de URL de artículo <span class="text-gray-400 font-normal">(opcional)</span></label>
+          <input name="article_url_pattern" placeholder="Ej: /noticias/, _102.html, /article/"
+                 class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+          <p class="text-xs text-gray-400 mt-1">Substring que debe aparecer en la URL para que se considere artículo. Sin valor, filtra por mismo dominio.</p>
+        </div>
+        <label class="flex items-center gap-2.5 cursor-pointer">
+          <input type="checkbox" name="use_stealth" value="1" class="w-4 h-4 text-teal-500 rounded">
+          <div>
+            <span class="text-sm text-gray-700 font-medium">Modo Stealth</span>
+            <p class="text-xs text-gray-400">Usa navegador para saltarse anti-bots (Cloudflare, etc.)</p>
+          </div>
+        </label>
+        <div class="flex gap-2 pt-2">
+          <button type="submit" class="btn-primary flex-1 justify-center">Guardar sitio</button>
+          <button type="button" @click="open=false" class="btn-ghost">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Table -->
+<div class="card overflow-hidden">
+  <table class="w-full">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="th">Sitio</th>
+        <th class="th">URL</th>
+        <th class="th">Patrón artículo</th>
+        <th class="th text-center">Hoy</th>
+        <th class="th text-center">Total</th>
+        <th class="th">Último scrape</th>
+        <th class="th text-center">Estado</th>
+        <th class="th text-center">Acciones</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for s in sites %}
+      <tr class="hover:bg-gray-50 group">
+        <td class="td font-medium text-gray-900">{{ s.name }}</td>
+        <td class="td">
+          <a href="{{ s.url }}" target="_blank" class="text-teal-500 hover:underline text-xs truncate max-w-[200px] block">{{ s.url }}</a>
+        </td>
+        <td class="td text-xs text-gray-400 font-mono">
+          {% if s.article_url_pattern %}{{ s.article_url_pattern }}{% else %}<span class="text-gray-300">dominio</span>{% endif %}
+        </td>
+        <td class="td text-center">
+          <span class="badge {% if s.today_count > 0 %}bg-teal-50 text-teal-700{% else %}bg-gray-100 text-gray-400{% endif %}">
+            {{ s.today_count }}
+          </span>
+        </td>
+        <td class="td text-center text-gray-500">{{ s.total_count }}</td>
+        <td class="td text-xs text-gray-400">
+          {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}Nunca{% endif %}
+        </td>
+        <td class="td text-center">
+          <form method="post" action="/sites/{{ s.id }}/toggle">
+            <button type="submit" class="badge {% if s.active %}bg-green-50 text-green-700 hover:bg-green-100{% else %}bg-gray-100 text-gray-500 hover:bg-gray-200{% endif %}">
+              {{ '● Activo' if s.active else '○ Paused' }}
+            </button>
+          </form>
+        </td>
+        <td class="td">
+          <div class="flex items-center justify-center gap-2">
+            <form method="post" action="/sites/{{ s.id }}/scrape" x-data="{l:false}" @submit="l=true">
+              <button type="submit" class="text-xs text-teal-600 hover:text-teal-800 font-medium px-2 py-1 rounded hover:bg-teal-50" :class="l&&'opacity-50'">
+                <span x-text="l?'...':'Scrapar'"></span>
+              </button>
+            </form>
+            <button type="button"
+                    onclick="editSite({{ s.id }}, {{ s.name|tojson }}, {{ s.url|tojson }}, {{ (s.css_selector or '')|tojson }}, {{ (s.article_url_pattern or '')|tojson }}, {{ s.use_stealth }})"
+                    class="text-xs text-gray-600 hover:text-gray-800 font-medium px-2 py-1 rounded hover:bg-gray-100">
+              Editar
+            </button>
+            <form method="post" action="/sites/{{ s.id }}/delete"
+                  onsubmit="return confirm('¿Eliminar {{ s.name }} y todos sus artículos?')">
+              <button type="submit" class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50">
+                Eliminar
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="8" class="td text-center py-16 text-gray-400">
+          <div class="flex flex-col items-center gap-3">
+            <svg class="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10"/></svg>
+            <p>No hay sitios registrados</p>
+            <button @click="$dispatch('open-modal')" class="btn-primary" x-data>Añadir primer sitio</button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Import Modal -->
+<div id="import_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:24px">
+  <div style="background:white;border-radius:12px;max-width:880px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+    <div style="padding:16px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:15px;font-weight:600;color:#111827">Importar lista de medios</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px">Sube un fichero o pega los nombres. Gemini buscará la URL de cada uno.</div>
+      </div>
+      <button onclick="document.getElementById('import_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1">×</button>
+    </div>
+
+    <!-- Stage 1: input -->
+    <div id="import_stage_input" style="padding:20px 24px;overflow-y:auto;flex:1">
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Fichero (txt o csv)</label>
+        <input type="file" id="import_file" accept=".txt,.csv,.tsv"
+               style="font-size:12px;width:100%;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc">
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Formato: un nombre por línea. Si tienes la URL: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">Marca, https://www.marca.com/</code></p>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">…o pegar directamente</label>
+        <textarea id="import_text" rows="8"
+                  placeholder="Marca&#10;Mundo Deportivo&#10;Sport&#10;AS&#10;Relevo&#10;..."
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:12px;font-family:monospace;resize:vertical"></textarea>
+      </div>
+      <div id="import_status" style="font-size:12px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="document.getElementById('import_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button onclick="importPreview()" class="btn-primary">
+          <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Buscar URLs
+        </button>
+      </div>
+    </div>
+
+    <!-- Stage 2: review & confirm -->
+    <div id="import_stage_review" style="display:none;flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:12px 24px;background:#f8fafc;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280">
+        Revisa, edita las URLs incorrectas y desmarca las que no quieras importar.
+      </div>
+      <div style="overflow-y:auto;flex:1">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="position:sticky;top:0;background:#fafafa;border-bottom:1px solid #f3f4f6;z-index:1">
+            <tr>
+              <th style="width:40px;padding:10px;text-align:center"></th>
+              <th style="padding:10px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;width:30%">Nombre</th>
+              <th style="padding:10px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">URL</th>
+              <th style="width:120px;padding:10px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Estado</th>
+            </tr>
+          </thead>
+          <tbody id="import_results_body"></tbody>
+        </table>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid #f3f4f6;display:flex;gap:8px;justify-content:flex-end">
+        <button onclick="importReset()" class="btn-ghost">← Volver</button>
+        <button id="import_confirm_btn" onclick="importConfirm()" class="btn-primary">Importar marcados</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="edit_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px">
+  <div style="background:white;border-radius:12px;max-width:520px;width:100%;padding:24px" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827;flex:1">Editar sitio</h2>
+      <button onclick="document.getElementById('edit_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1">×</button>
+    </div>
+    <form id="edit_form" method="post" action="/sites/0/edit" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre del sitio *</label>
+        <input id="edit_name" name="name" required
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">URL *</label>
+        <input id="edit_url" name="url" type="url" required
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Selector CSS <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <input id="edit_css" name="css_selector"
+               placeholder="Ej: .article-list, #news"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Patrón de URL de artículo <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <input id="edit_pattern" name="article_url_pattern"
+               placeholder="Ej: /noticias/, _102.html, /article/"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Substring que debe contener la URL para considerarse artículo. Sin valor → filtra por mismo dominio.</p>
+      </div>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <input type="checkbox" id="edit_stealth" name="use_stealth" value="1" style="width:16px;height:16px;accent-color:#14b8a6">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:#374151">Modo Stealth</div>
+          <div style="font-size:11px;color:#9ca3af">Fuerza navegador anti-bot (Cloudflare, etc.)</div>
+        </div>
+      </label>
+      <div style="display:flex;gap:8px;padding-top:8px">
+        <button type="submit" class="btn-primary" style="flex:1;justify-content:center">Guardar cambios</button>
+        <button type="button" onclick="document.getElementById('edit_modal').style.display='none'"
+                class="btn-ghost">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// ── Import flow ────────────────────────────────────────
+async function importPreview() {
+  const fileEl = document.getElementById('import_file');
+  const textEl = document.getElementById('import_text');
+  const status = document.getElementById('import_status');
+  const tbody  = document.getElementById('import_results_body');
+  const stage1 = document.getElementById('import_stage_input');
+  const stage2 = document.getElementById('import_stage_review');
+
+  if (!fileEl.files.length && !textEl.value.trim()) {
+    alert('Sube un fichero o escribe nombres en el cuadro de texto');
+    return;
+  }
+  status.textContent = 'Buscando URLs vía Gemini... puede tardar varios segundos.';
+  status.style.color = '#6b7280';
+
+  const fd = new FormData();
+  if (fileEl.files.length) fd.append('file', fileEl.files[0]);
+  if (textEl.value.trim()) fd.append('text', textEl.value);
+
+  try {
+    const r = await fetch('/sites/import/preview', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!data.ok) {
+      status.textContent = 'Error: ' + (data.error || 'desconocido');
+      status.style.color = '#dc2626';
+      return;
+    }
+    if (!data.ai_used) {
+      status.textContent = '⚠ Sin GEMINI_API_KEY: las URLs no se han buscado automáticamente. Edítalas manualmente abajo.';
+      status.style.color = '#d97706';
+    }
+    tbody.innerHTML = '';
+    data.items.forEach((item, i) => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #f3f4f6';
+      tr.innerHTML = `
+        <td style="padding:8px 12px;text-align:center">
+          <input type="checkbox" data-i="${i}" ${item.duplicate || !item.url ? '' : 'checked'} style="width:14px;height:14px">
+        </td>
+        <td style="padding:8px 12px;font-size:13px">
+          <input data-name="${i}" value="${(item.name||'').replace(/"/g,'&quot;')}"
+                 style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+        </td>
+        <td style="padding:8px 12px">
+          <input data-url="${i}" value="${(item.url||'').replace(/"/g,'&quot;')}"
+                 placeholder="https://..."
+                 style="border:1px solid ${item.url ? '#e5e7eb' : '#fde68a'};border-radius:6px;padding:5px 8px;font-size:12px;width:100%;background:${item.url ? 'white' : '#fffbeb'}">
+        </td>
+        <td style="padding:8px 12px;text-align:center">
+          ${item.duplicate
+            ? '<span class="badge badge-gray" style="font-size:10px">Ya existe</span>'
+            : item.found
+              ? '<span class="badge badge-green" style="font-size:10px">Encontrado</span>'
+              : '<span class="badge badge-amber" style="font-size:10px">Revisar</span>'}
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+    stage1.style.display = 'none';
+    stage2.style.display = 'block';
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+    status.style.color = '#dc2626';
+  }
+}
+
+async function importConfirm() {
+  const tbody = document.getElementById('import_results_body');
+  const items = [];
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const cb = tr.querySelector('input[type=checkbox]');
+    if (!cb || !cb.checked) return;
+    const i = cb.dataset.i;
+    const name = tr.querySelector(`[data-name="${i}"]`).value.trim();
+    const url  = tr.querySelector(`[data-url="${i}"]`).value.trim();
+    if (name && url) items.push({ name, url });
+  });
+  if (!items.length) { alert('Marca al menos un sitio'); return; }
+  const btn = document.getElementById('import_confirm_btn');
+  btn.textContent = 'Guardando...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/sites/import/confirm', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ items })
+    });
+    const data = await r.json();
+    alert(`✓ ${data.added} sitios añadidos · ${data.skipped} omitidos`);
+    window.location.reload();
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.textContent = 'Importar marcados';
+    btn.disabled = false;
+  }
+}
+
+function importReset() {
+  document.getElementById('import_stage_input').style.display  = 'block';
+  document.getElementById('import_stage_review').style.display = 'none';
+  document.getElementById('import_status').textContent = '';
+  document.getElementById('import_file').value = '';
+  document.getElementById('import_text').value = '';
+}
+
+function editSite(id, name, url, css, pattern, stealth) {
+  document.getElementById('edit_form').action = '/sites/' + id + '/edit';
+  document.getElementById('edit_name').value    = name || '';
+  document.getElementById('edit_url').value     = url || '';
+  document.getElementById('edit_css').value     = css || '';
+  document.getElementById('edit_pattern').value = pattern || '';
+  document.getElementById('edit_stealth').checked = !!stealth;
+  document.getElementById('edit_modal').style.display = 'flex';
+}
+document.getElementById('edit_modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+document.getElementById('import_modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Ajustes · Scraper Hub{% endblock %}
+{% block page_title %}Ajustes de scraping automático{% endblock %}
+{% block page_sub %}Configura cuándo se scrapea y enriquece cada medio · revisión cada 5 min{% endblock %}
+
+{% block content %}
+
+<!-- AI status banner -->
+<div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;
+            {% if ai_configured %}background:#f0fdf4;border-color:#bbf7d0{% else %}background:#fffbeb;border-color:#fde68a{% endif %}">
+  <svg style="width:18px;height:18px;color:{% if ai_configured %}#16a34a{% else %}#d97706{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    {% if ai_configured %}<polyline points="20 6 9 17 4 12"/>
+    {% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}
+  </svg>
+  <div style="flex:1">
+    <div style="font-size:13px;font-weight:600;color:{% if ai_configured %}#15803d{% else %}#b45309{% endif %}">
+      {% if ai_configured %}Extracción AI activa (Gemini){% else %}Extracción AI desactivada{% endif %}
+    </div>
+    <div style="font-size:11px;color:#6b7280;margin-top:2px">
+      {% if ai_configured %}
+        Auto-enrich rellenará Propiedad/Marca/Agencia/Resumen automáticamente tras cada scrape.
+      {% else %}
+        Sin <code style="background:#fef3c7;padding:1px 5px;border-radius:4px">GEMINI_API_KEY</code> configurada — auto-enrich sólo guardará el cuerpo del artículo. Reinicia el servidor con la variable para activar AI.
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Sites table -->
+<div class="card" style="overflow:hidden">
+  <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:13px;font-weight:600;color:#111827">Frecuencia de scraping por medio</span>
+    <a href="/sites" style="font-size:12px;color:#14b8a6;text-decoration:none">Gestionar sitios →</a>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+      <tr>
+        <th>Medio</th>
+        <th style="width:160px">Frecuencia</th>
+        <th style="width:140px;text-align:center">Auto-enrich</th>
+        <th>Último scrape</th>
+        <th>Próximo</th>
+        <th style="width:100px;text-align:center">Estado</th>
+        <th style="width:100px;text-align:center"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sites %}
+      <tr id="site_row_{{ s.id }}" style="border-bottom:1px solid #f9fafb">
+        <td>
+          <div style="font-weight:500;font-size:13px;color:#111827">{{ s.name }}</div>
+          <div style="font-size:11px;color:#9ca3af">{{ s.today_count }} hoy · {{ s.total_count }} total</div>
+        </td>
+        <td>
+          <select id="freq_{{ s.id }}" style="border:1px solid #e5e7eb;border-radius:8px;font-size:12px;padding:5px 10px;width:100%">
+            <option value="0"  {% if s.scrape_frequency_days == 0 %}selected{% endif %}>Manual</option>
+            <option value="1"  {% if s.scrape_frequency_days == 1 %}selected{% endif %}>Cada día</option>
+            <option value="2"  {% if s.scrape_frequency_days == 2 %}selected{% endif %}>Cada 2 días</option>
+            <option value="3"  {% if s.scrape_frequency_days == 3 %}selected{% endif %}>Cada 3 días</option>
+            <option value="7"  {% if s.scrape_frequency_days == 7 %}selected{% endif %}>1 vez/semana</option>
+            <option value="14" {% if s.scrape_frequency_days == 14 %}selected{% endif %}>Cada 2 semanas</option>
+            <option value="30" {% if s.scrape_frequency_days == 30 %}selected{% endif %}>1 vez/mes</option>
+          </select>
+        </td>
+        <td style="text-align:center">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#6b7280">
+            <input type="checkbox" id="enrich_{{ s.id }}" {% if s.auto_enrich %}checked{% endif %} style="width:16px;height:16px;accent-color:#14b8a6">
+            <span>Activar</span>
+          </label>
+        </td>
+        <td style="font-size:11px;color:#9ca3af">
+          {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}<span style="color:#d1d5db">Nunca</span>{% endif %}
+        </td>
+        <td style="font-size:11px;color:#9ca3af" id="next_{{ s.id }}">
+          {% if s.scrape_frequency_days == 0 %}<span style="color:#d1d5db">—</span>
+          {% elif not s.last_scraped %}<span style="color:#16a34a">en próximos 5 min</span>
+          {% else %}cada {{ s.scrape_frequency_days }} día{% if s.scrape_frequency_days > 1 %}s{% endif %}{% endif %}
+        </td>
+        <td style="text-align:center">
+          {% if s.active %}
+          <span class="badge badge-green">Activo</span>
+          {% else %}
+          <span class="badge badge-gray">Pausado</span>
+          {% endif %}
+        </td>
+        <td style="text-align:center">
+          <button onclick="saveSchedule({{ s.id }})" id="btn_{{ s.id }}"
+                  class="btn-primary" style="font-size:11px;padding:5px 12px">Guardar</button>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="padding:48px;text-align:center;color:#9ca3af">
+        Sin medios configurados. <a href="/sites" style="color:#14b8a6">Añadir →</a>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- How it works -->
+<div class="card" style="padding:18px;margin-top:16px;background:#fafafa">
+  <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px">Cómo funciona</div>
+  <ul style="font-size:12px;color:#6b7280;line-height:1.7;padding-left:18px;margin:0">
+    <li>El scheduler revisa cada <b>5 minutos</b> qué medios están dentro de su ventana de frecuencia.</li>
+    <li><b>Manual</b>: sólo se scrapea al pulsar "Scrapar" en /sites o "Scrapar Todo" en /news.</li>
+    <li><b>Auto-enrich</b>: tras un scrape automático, rellena Propiedad/Marca/Agencia/Resumen en los nuevos artículos (requiere <code>GEMINI_API_KEY</code>).</li>
+    <li>Pausar un medio en <a href="/sites" style="color:#14b8a6">Sitios</a> lo excluye del scheduler aunque tenga frecuencia configurada.</li>
+  </ul>
+</div>
+
+<script>
+async function saveSchedule(siteId) {
+  const btn = document.getElementById('btn_' + siteId);
+  const fd  = new FormData();
+  fd.append('scrape_frequency_days', document.getElementById('freq_' + siteId).value);
+  fd.append('auto_enrich',           document.getElementById('enrich_' + siteId).checked ? 1 : 0);
+  btn.textContent = '...';
+  btn.disabled = true;
+  try {
+    const r    = await fetch('/sites/' + siteId + '/schedule', { method:'POST', body: fd });
+    const data = await r.json();
+    if (data.ok) {
+      btn.textContent = '✓ Guardado';
+      btn.style.background = '#16a34a';
+      // update next-scrape cell
+      const next = document.getElementById('next_' + siteId);
+      if (data.scrape_frequency_days === 0) {
+        next.innerHTML = '<span style="color:#d1d5db">—</span>';
+      } else if (!data.last_scraped) {
+        next.innerHTML = '<span style="color:#16a34a">en próximos 5 min</span>';
+      } else {
+        next.textContent = `cada ${data.scrape_frequency_days} día${data.scrape_frequency_days>1?'s':''}`;
+      }
+    } else {
+      btn.textContent = '✗ Error';
+      btn.style.background = '#dc2626';
+    }
+  } catch(e) {
+    btn.textContent = '✗ Error';
+    btn.style.background = '#dc2626';
+  }
+  setTimeout(() => {
+    btn.textContent = 'Guardar';
+    btn.style.background = '';
+    btn.disabled = false;
+  }, 2000);
+}
+</script>
+{% endblock %}

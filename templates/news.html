@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+
+{% block title %}Noticias · Scraper Hub{% endblock %}
+{% block page_title %}Noticias{% endblock %}
+{% block page_sub %}Tabla de artículos por noticia — {{ filter_date }}{% endblock %}
+
+{% block header_actions %}
+  <button onclick="enrichAll()" id="enrich_all_btn" class="btn-ghost" style="border:1px solid #fde68a;background:#fffbeb;color:#b45309">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    <span id="enrich_all_label">Enriquecer todos</span>
+  </button>
+  <form method="post" action="/scrape-all" x-data="{l:false}" @submit="l=true" style="display:inline">
+    <button type="submit" class="btn-primary" :disabled="l">
+      <svg style="width:14px;height:14px" :style="l&&'animation:spin 1s linear infinite'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      <span x-text="l?'Scrapeando...':'Scrapar Todo'">Scrapar Todo</span>
+    </button>
+  </form>
+{% endblock %}
+
+{% block content %}
+<div x-data="newsPage()">
+
+  <!-- Filters bar -->
+  <form method="get" action="/news" class="card" style="padding:12px 18px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <!-- Search input -->
+    <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:240px;max-width:380px">
+      <svg style="width:14px;height:14px;color:#9ca3af" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" name="q" value="{{ search_q }}"
+             placeholder="Buscar en titular, contenido, marca..."
+             style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:6px 10px;width:100%"
+             autocomplete="off">
+    </div>
+    <button type="submit" class="btn-primary" style="font-size:12px;padding:5px 12px">Buscar</button>
+    {% if search_q %}
+    <a href="/news" style="font-size:11px;color:#9ca3af;text-decoration:none">Limpiar</a>
+    {% endif %}
+
+    <!-- Date filter (hidden when searching, since search spans all dates) -->
+    {% if not search_q %}
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#6b7280;font-weight:600">FECHA</label>
+      <select name="date_filter" style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px"
+              onchange="this.form.submit()">
+        {% for d in available_dates %}
+        <option value="{{ d }}" {% if d == filter_date %}selected{% endif %}>{{ d }}</option>
+        {% endfor %}
+        {% if filter_date and filter_date not in available_dates %}
+        <option value="{{ filter_date }}" selected>{{ filter_date }}</option>
+        {% endif %}
+      </select>
+    </div>
+    {% endif %}
+
+    <!-- Site filter -->
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="font-size:11px;color:#6b7280;font-weight:600">SITIO</label>
+      <select name="site_id" style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px"
+              onchange="this.form.submit()">
+        <option value="">Todos</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}" {% if filter_site == s.id %}selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:#9ca3af"><span x-text="selected.length"></span> seleccionados</span>
+      <button type="button" @click="crearCorreo()" x-show="selected.length > 0" class="btn-primary" style="font-size:12px;padding:5px 12px">
+        <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Crear Correo
+      </button>
+      <span style="font-size:12px;color:#9ca3af">
+        {% if search_q %}<b>{{ articles | length }}</b> resultados para «<b>{{ search_q }}</b>»{% else %}{{ articles | length }} artículos{% endif %}
+      </span>
+    </div>
+  </form>
+
+  <!-- Table -->
+  <div class="card" style="overflow:hidden">
+    <table style="width:100%;border-collapse:collapse">
+      <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+        <tr>
+          <th style="width:36px">
+            <input type="checkbox" style="width:14px;height:14px" @change="toggleAll($event)">
+          </th>
+          <th>Titular</th>
+          <th style="width:130px">Propiedad</th>
+          <th style="width:130px">Marca</th>
+          <th style="width:110px">Agencia</th>
+          <th>Resumen</th>
+          <th style="width:90px;text-align:center">Contenido</th>
+          <th style="width:110px;text-align:center">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in articles %}
+        <tr id="row_{{ a.id }}" style="border-bottom:1px solid #f9fafb">
+
+          <!-- Checkbox -->
+          <td>
+            <input type="checkbox" style="width:14px;height:14px" value="{{ a.id }}"
+                   @change="toggleSelect($event, {{ a.id }})">
+          </td>
+
+          <!-- Title -->
+          <td style="max-width:240px">
+            {% if a.category %}<span class="badge badge-slate" style="font-size:10px">{{ a.category }}</span><br>{% endif %}
+            <a href="{{ a.article_url or '#' }}" target="_blank"
+               style="font-size:13px;color:#111827;text-decoration:none;display:block;line-height:1.4"
+               class="line-clamp-2">{{ a.title }}</a>
+            <div style="font-size:10px;color:#9ca3af;margin-top:2px">{{ a.site_name }}</div>
+          </td>
+
+          <!-- Propiedad -->
+          <td>
+            <span id="prop_badge_{{ a.id }}"
+                  style="font-size:11px;{% if a.company_property %}background:#eff6ff;color:#2563eb;padding:2px 8px;border-radius:999px{% else %}color:#d1d5db{% endif %}">
+              {{ a.company_property or '—' }}
+            </span>
+          </td>
+
+          <!-- Marca -->
+          <td>
+            <span id="brand_badge_{{ a.id }}"
+                  style="font-size:11px;{% if a.company_brand %}background:#f5f3ff;color:#7c3aed;padding:2px 8px;border-radius:999px{% else %}color:#d1d5db{% endif %}">
+              {{ a.company_brand or '—' }}
+            </span>
+          </td>
+
+          <!-- Agencia -->
+          <td>
+            <span id="agency_badge_{{ a.id }}"
+                  style="font-size:11px;{% if a.company_agency %}background:#fffbeb;color:#d97706;padding:2px 8px;border-radius:999px{% else %}color:#d1d5db{% endif %}">
+              {{ a.company_agency or '—' }}
+            </span>
+          </td>
+
+          <!-- Resumen -->
+          <td style="max-width:200px">
+            <span id="summary_text_{{ a.id }}" style="font-size:11px;color:#6b7280;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
+              {{ a.summary or '—' }}
+            </span>
+          </td>
+
+          <!-- Contenido / body -->
+          <td style="text-align:center">
+            {% if a.body %}
+            <button id="body_cell_{{ a.id }}" onclick="openBody({{ a.id }})"
+                    style="background:#f0fdfa;color:#0d9488;border:none;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500">
+              Ver
+            </button>
+            {% else %}
+            <span id="body_cell_{{ a.id }}" style="color:#d1d5db;font-size:11px">—</span>
+            {% endif %}
+          </td>
+
+          <!-- Acciones -->
+          <td style="text-align:center">
+            <div style="display:flex;align-items:center;justify-content:center;gap:4px">
+              <!-- Edit -->
+              <button onclick="toggleEdit({{ a.id }})"
+                      style="background:none;border:none;cursor:pointer;color:#9ca3af;padding:4px 6px;border-radius:6px"
+                      title="Editar">
+                <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <!-- Enrich -->
+              <button id="enrich_btn_{{ a.id }}" onclick="enrichArticle({{ a.id }})"
+                      style="background:none;border:none;cursor:pointer;color:#9ca3af;padding:4px 6px;border-radius:6px"
+                      title="Enriquecer con IA (scrape + extracción automática)">
+                <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              </button>
+            </div>
+          </td>
+        </tr>
+
+        <!-- Edit row (hidden by default) -->
+        <tr id="edit_row_{{ a.id }}" style="display:none;background:#f0fdfa">
+          <td colspan="8" style="padding:12px 18px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 2fr;gap:10px;max-width:900px">
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Propiedad</label>
+                <input id="edit_prop_{{ a.id }}" value="{{ a.company_property }}"
+                       placeholder="Liga, club, federación…"
+                       style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px">
+              </div>
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Marca</label>
+                <input id="edit_brand_{{ a.id }}" value="{{ a.company_brand }}"
+                       placeholder="Patrocinador, fabricante…"
+                       style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px">
+              </div>
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#d97706;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Agencia</label>
+                <input id="edit_agency_{{ a.id }}" value="{{ a.company_agency }}"
+                       placeholder="Agencia, plataforma, medio…"
+                       style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px">
+              </div>
+              <div>
+                <label style="display:block;font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Resumen</label>
+                <input id="edit_summary_{{ a.id }}" value="{{ a.summary }}"
+                       placeholder="Resumen para correo ejecutivo…"
+                       style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+              <button onclick="saveRow({{ a.id }})" class="btn-primary" style="font-size:12px;padding:5px 14px">
+                <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                Guardar
+              </button>
+              <button onclick="toggleEdit({{ a.id }})" class="btn-ghost" style="font-size:12px;padding:5px 12px">Cancelar</button>
+              <span id="saved_{{ a.id }}" style="display:none;font-size:11px;color:#16a34a;align-items:center;gap:4px">
+                <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                Guardado
+              </span>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" style="padding:48px;text-align:center;color:#9ca3af;font-size:13px">
+            <svg style="width:40px;height:40px;color:#e5e7eb;display:block;margin:0 auto 12px" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 9h16"/></svg>
+            Sin artículos para {{ filter_date }}
+            <form method="post" action="/scrape-all" style="margin-top:12px">
+              <button class="btn-primary" style="font-size:12px;padding:6px 16px">Scrapar ahora</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Body modal -->
+<div id="body_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:24px">
+  <div style="background:white;border-radius:12px;max-width:920px;width:100%;height:90vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:16px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+      <div style="flex:1;min-width:0">
+        <div id="body_modal_title" style="font-size:14px;font-weight:600;color:#111827;line-height:1.4"></div>
+        <a id="body_modal_link" href="#" target="_blank" rel="noopener"
+           style="font-size:11px;color:#14b8a6;text-decoration:none;display:inline-block;margin-top:4px">Abrir original →</a>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <button onclick="copyBodyText()" class="btn-ghost" style="font-size:11px;padding:4px 10px">Copiar</button>
+        <button onclick="document.getElementById('body_modal').style.display='none'"
+                style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:0 4px">×</button>
+      </div>
+    </div>
+    <div id="body_modal_content" style="padding:24px 28px;overflow-y:auto;font-size:14px;line-height:1.75;color:#374151;white-space:pre-wrap;font-family:Georgia,'Times New Roman',serif;flex:1"></div>
+  </div>
+</div>
+
+<script>
+function newsPage() {
+  return {
+    selected: [],
+    toggleAll(e) {
+      const boxes = document.querySelectorAll('input[type=checkbox][value]');
+      this.selected = e.target.checked ? Array.from(boxes).map(b => b.value) : [];
+      boxes.forEach(b => b.checked = e.target.checked);
+    },
+    toggleSelect(e, id) {
+      if (e.target.checked) { this.selected.push(String(id)); }
+      else { this.selected = this.selected.filter(s => s !== String(id)); }
+    },
+    crearCorreo() {
+      window.location.href = '/email?article_ids=' + this.selected.join(',');
+    }
+  }
+}
+
+function toggleEdit(id) {
+  const row = document.getElementById('edit_row_' + id);
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+async function saveRow(id) {
+  const fd = new FormData();
+  fd.append('company_property', document.getElementById('edit_prop_' + id).value);
+  fd.append('company_brand',    document.getElementById('edit_brand_' + id).value);
+  fd.append('company_agency',   document.getElementById('edit_agency_' + id).value);
+  fd.append('summary',          document.getElementById('edit_summary_' + id).value);
+  await fetch('/articles/' + id, { method: 'POST', body: fd });
+  // Update badges in main row
+  updateBadges(id, {
+    company_property: fd.get('company_property'),
+    company_brand:    fd.get('company_brand'),
+    company_agency:   fd.get('company_agency'),
+    summary:          fd.get('summary'),
+  });
+  const el = document.getElementById('saved_' + id);
+  el.style.display = 'inline-flex';
+  setTimeout(() => el.style.display = 'none', 2000);
+}
+
+async function enrichArticle(id) {
+  const btn = document.getElementById('enrich_btn_' + id);
+  btn.innerHTML = '<svg style="width:13px;height:13px;animation:spin 1s linear infinite" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+  btn.disabled = true;
+  try {
+    const res  = await fetch('/articles/' + id + '/enrich', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      updateBadges(id, data);
+      // update edit inputs too
+      ['prop','brand','agency','summary'].forEach(f => {
+        const el = document.getElementById('edit_' + f + '_' + id);
+        if (el) el.value = data['company_' + f] || data[f] || el.value;
+      });
+      // update body cell
+      if (data.has_body) {
+        const cell = document.getElementById('body_cell_' + id);
+        if (cell) {
+          cell.outerHTML = `<button id="body_cell_${id}" onclick="openBody(${id})"
+            style="background:#f0fdfa;color:#0d9488;border:none;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500">Ver</button>`;
+        }
+      }
+      btn.style.color = '#16a34a';
+    }
+  } catch(e) {
+    btn.style.color = '#dc2626';
+  }
+  btn.innerHTML = '<svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
+  btn.disabled = false;
+}
+
+function updateBadges(id, data) {
+  const fields = [
+    ['prop_badge_' + id,    data.company_property, '#eff6ff', '#2563eb'],
+    ['brand_badge_' + id,   data.company_brand,    '#f5f3ff', '#7c3aed'],
+    ['agency_badge_' + id,  data.company_agency,   '#fffbeb', '#d97706'],
+  ];
+  fields.forEach(([elId, val, bg, color]) => {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = val || '—';
+    if (val) {
+      el.style.cssText = `font-size:11px;background:${bg};color:${color};padding:2px 8px;border-radius:999px`;
+    } else {
+      el.style.cssText = 'font-size:11px;color:#d1d5db';
+    }
+  });
+  const sumEl = document.getElementById('summary_text_' + id);
+  if (sumEl && data.summary) sumEl.textContent = data.summary;
+}
+
+async function openBody(id) {
+  const modal   = document.getElementById('body_modal');
+  const titleEl = document.getElementById('body_modal_title');
+  const linkEl  = document.getElementById('body_modal_link');
+  const content = document.getElementById('body_modal_content');
+  titleEl.textContent = 'Cargando…';
+  linkEl.href = '#';
+  content.textContent = '';
+  modal.style.display = 'flex';
+  try {
+    const r = await fetch('/articles/' + id + '/body');
+    const data = await r.json();
+    if (data.ok) {
+      titleEl.textContent = data.title || '';
+      linkEl.href = data.url || '#';
+      content.textContent = data.body || '(Sin contenido raspado. Pulsa el botón ⚡ para enriquecer.)';
+    } else {
+      content.textContent = 'Error cargando el contenido.';
+    }
+  } catch(e) {
+    content.textContent = 'Error de red: ' + e.message;
+  }
+}
+
+async function copyBodyText() {
+  const txt = document.getElementById('body_modal_content').textContent;
+  try {
+    await navigator.clipboard.writeText(txt);
+    alert('Contenido copiado al portapapeles');
+  } catch { alert('No se pudo copiar'); }
+}
+
+document.getElementById('body_modal')?.addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    const m = document.getElementById('body_modal');
+    if (m && m.style.display === 'flex') m.style.display = 'none';
+  }
+});
+
+// Concurrency-limited bulk enrich
+const ALL_ARTICLE_IDS = [{% for a in articles %}{{ a.id }}{% if not loop.last %},{% endif %}{% endfor %}];
+let _enrichCancelled = false;
+
+async function enrichAll() {
+  const btn   = document.getElementById('enrich_all_btn');
+  const label = document.getElementById('enrich_all_label');
+  if (btn.dataset.running === '1') {
+    _enrichCancelled = true;
+    label.textContent = 'Cancelando...';
+    return;
+  }
+  if (!ALL_ARTICLE_IDS.length) { alert('Sin artículos a procesar'); return; }
+  if (!confirm(`Enriquecer ${ALL_ARTICLE_IDS.length} artículos? Tomará ~${Math.ceil(ALL_ARTICLE_IDS.length * 6 / 60)} min.`)) return;
+
+  btn.dataset.running = '1';
+  _enrichCancelled = false;
+  let done = 0, ok = 0, fail = 0;
+  const total = ALL_ARTICLE_IDS.length;
+
+  // Process 3 at a time
+  const CONCURRENCY = 3;
+  const queue = [...ALL_ARTICLE_IDS];
+
+  async function worker() {
+    while (queue.length && !_enrichCancelled) {
+      const id = queue.shift();
+      try {
+        const r = await fetch('/articles/' + id + '/enrich', { method: 'POST' });
+        const data = await r.json();
+        if (data.ok) {
+          updateBadges(id, data);
+          ['prop','brand','agency','summary'].forEach(f => {
+            const el = document.getElementById('edit_' + f + '_' + id);
+            if (el) el.value = data['company_' + f] || data[f] || el.value;
+          });
+          if (data.has_body) {
+            const cell = document.getElementById('body_cell_' + id);
+            if (cell) {
+              cell.outerHTML = `<button id="body_cell_${id}" onclick="openBody(${id})"
+                style="background:#f0fdfa;color:#0d9488;border:none;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500">Ver</button>`;
+            }
+          }
+          ok++;
+        } else { fail++; }
+      } catch(e) { fail++; }
+      done++;
+      label.textContent = `${done}/${total} (${ok}✓ ${fail}✗) — clic para cancelar`;
+    }
+  }
+
+  await Promise.all(Array(CONCURRENCY).fill(0).map(() => worker()));
+
+  btn.dataset.running = '0';
+  label.textContent = _enrichCancelled
+    ? `Cancelado (${ok}/${total})`
+    : `Listo · ${ok}/${total} enriquecidos`;
+  setTimeout(() => label.textContent = 'Enriquecer todos', 5000);
+}
+</script>
+{% endblock %}

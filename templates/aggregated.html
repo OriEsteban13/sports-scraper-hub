@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Agregado · Scraper Hub{% endblock %}
+{% block page_title %}Agregado{% endblock %}
+{% block page_sub %}Historial completo de artículos · {{ total }} resultados{% endblock %}
+
+{% block header_actions %}
+  <a href="/email" class="btn-ghost">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    Ir a Correos
+  </a>
+{% endblock %}
+
+{% block content %}
+<div x-data="{ selected: [] }">
+
+<!-- Filters -->
+<form method="get" action="/aggregated" class="card px-4 py-3 mb-4 flex flex-wrap items-center gap-3">
+  <div class="flex items-center gap-2">
+    <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input name="q" value="{{ search_q }}" placeholder="Buscar titular, resumen, marca..."
+           class="border border-gray-200 rounded-lg text-sm px-3 py-1.5 w-56 focus:outline-none focus:ring-2 focus:ring-teal-400">
+  </div>
+  <select name="site_id" class="border border-gray-200 rounded-lg text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-400">
+    <option value="">Todos los sitios</option>
+    {% for s in sites %}
+    <option value="{{ s.id }}" {% if filter_site == s.id %}selected{% endif %}>{{ s.name }}</option>
+    {% endfor %}
+  </select>
+  {% if categories %}
+  <select name="category" class="border border-gray-200 rounded-lg text-sm px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-400">
+    <option value="">Todas las categorías</option>
+    {% for c in categories %}
+    <option value="{{ c }}" {% if filter_category == c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <button type="submit" class="btn-primary text-xs px-3 py-1.5">Filtrar</button>
+  {% if search_q or filter_site or filter_category %}
+  <a href="/aggregated" class="text-xs text-gray-400 hover:text-gray-600">Limpiar</a>
+  {% endif %}
+  <div class="ml-auto flex items-center gap-2">
+    <span class="text-sm text-gray-500"><span x-text="selected.length"></span> sel.</span>
+    <button type="button" x-show="selected.length > 0"
+            @click="window.location.href='/email?article_ids='+selected.join(',')"
+            class="btn-primary text-xs px-3 py-1.5">
+      Crear Correo
+    </button>
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card overflow-hidden mb-4">
+  <table class="w-full">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="th w-10">
+          <input type="checkbox" class="w-4 h-4 rounded text-teal-500"
+                 @change="selected = $event.target.checked ? [{% for a in articles %}{{ a.id }}{% if not loop.last %},{% endif %}{% endfor %}].map(String) : []; document.querySelectorAll('.row-cb').forEach(cb=>cb.checked=$event.target.checked)">
+        </th>
+        <th class="th">Titular</th>
+        <th class="th w-24">Fecha</th>
+        <th class="th w-24">Sitio</th>
+        <th class="th w-32">Propiedad</th>
+        <th class="th w-32">Marca</th>
+        <th class="th w-28">Agencia</th>
+        <th class="th">Resumen</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for a in articles %}
+      <tr class="hover:bg-gray-50">
+        <td class="td">
+          <input type="checkbox" class="row-cb w-4 h-4 rounded text-teal-500"
+                 value="{{ a.id }}"
+                 @change="$event.target.checked ? selected.push(String({{ a.id }})) : (selected = selected.filter(s=>s!==String({{ a.id }})))">
+        </td>
+        <td class="td max-w-sm">
+          <div class="space-y-0.5">
+            {% if a.category %}<span class="badge bg-slate-100 text-slate-600 text-[10px]">{{ a.category }}</span>{% endif %}
+            <a href="{{ a.article_url or '#' }}" target="_blank"
+               class="block text-sm text-gray-800 hover:text-teal-600 line-clamp-2 leading-snug">{{ a.title }}</a>
+          </div>
+        </td>
+        <td class="td text-xs text-gray-400">{{ a.scrape_date }}</td>
+        <td class="td text-xs text-gray-500">{{ a.site_name }}</td>
+        <td class="td">
+          {% if a.company_property %}
+          <span class="badge bg-blue-50 text-blue-700 text-xs">{{ a.company_property }}</span>
+          {% else %}<span class="text-gray-300 text-xs">—</span>{% endif %}
+        </td>
+        <td class="td">
+          {% if a.company_brand %}
+          <span class="badge bg-violet-50 text-violet-700 text-xs">{{ a.company_brand }}</span>
+          {% else %}<span class="text-gray-300 text-xs">—</span>{% endif %}
+        </td>
+        <td class="td">
+          {% if a.company_agency %}
+          <span class="badge bg-amber-50 text-amber-700 text-xs">{{ a.company_agency }}</span>
+          {% else %}<span class="text-gray-300 text-xs">—</span>{% endif %}
+        </td>
+        <td class="td text-xs text-gray-500 max-w-xs">
+          <span class="line-clamp-2">{{ a.summary or '—' }}</span>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="td text-center py-16 text-gray-400">
+        <div class="flex flex-col items-center gap-2">
+          <svg class="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          <p>Sin resultados{% if search_q %} para «{{ search_q }}»{% endif %}</p>
+        </div>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="flex items-center justify-between">
+  <p class="text-sm text-gray-500">Mostrando {{ (page-1)*per_page+1 }}–{{ [page*per_page, total]|min }} de {{ total }}</p>
+  <div class="flex gap-1">
+    {% if page > 1 %}
+    <a href="?page={{ page-1 }}{% if search_q %}&q={{ search_q }}{% endif %}{% if filter_site %}&site_id={{ filter_site }}{% endif %}{% if filter_category %}&category={{ filter_category }}{% endif %}"
+       class="btn-ghost text-xs px-3 py-1.5">← Anterior</a>
+    {% endif %}
+    {% for p in range(1, total_pages+1) %}
+    {% if p == page %}
+    <span class="btn-primary text-xs px-3 py-1.5">{{ p }}</span>
+    {% elif p <= 3 or p > total_pages-3 or (p >= page-1 and p <= page+1) %}
+    <a href="?page={{ p }}{% if search_q %}&q={{ search_q }}{% endif %}{% if filter_site %}&site_id={{ filter_site }}{% endif %}{% if filter_category %}&category={{ filter_category }}{% endif %}"
+       class="btn-ghost text-xs px-3 py-1.5">{{ p }}</a>
+    {% endif %}
+    {% endfor %}
+    {% if page < total_pages %}
+    <a href="?page={{ page+1 }}{% if search_q %}&q={{ search_q }}{% endif %}{% if filter_site %}&site_id={{ filter_site }}{% endif %}{% if filter_category %}&category={{ filter_category }}{% endif %}"
+       class="btn-ghost text-xs px-3 py-1.5">Siguiente →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+</div>
+{% endblock %}

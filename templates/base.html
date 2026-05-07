@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Sports Scraper Hub{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* ── Layout ─────────────────────────────── */
+    body { display:flex; height:100vh; overflow:hidden; background:#f1f5f9; font-family:'Inter',system-ui,sans-serif; color:#111827; }
+
+    /* ── Sidebar ─────────────────────────────── */
+    aside { width:220px; background:#0d1117; display:flex; flex-direction:column; height:100%; flex-shrink:0; border-right:1px solid #21262d; }
+    .logo-area { padding:18px 16px; border-bottom:1px solid #21262d; display:flex; align-items:center; gap:10px; }
+    .logo-icon { width:32px;height:32px;background:#14b8a6;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700;flex-shrink:0; }
+    .logo-name { color:white;font-size:14px;font-weight:600;line-height:1.2; }
+    .logo-sub  { color:#6b7280;font-size:11px; }
+    nav { flex:1; padding:10px; overflow-y:auto; }
+    .nav-section { color:#4b5563;font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;padding:14px 10px 6px; }
+    .nav-item { display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:13px;font-weight:500;text-decoration:none;transition:all .15s;margin-bottom:1px; }
+    .nav-active { background:#21262d;color:#ffffff; }
+    .nav-idle   { color:#9ca3af; }
+    .nav-idle:hover { color:#ffffff;background:#161b22; }
+    .nav-item svg { width:16px;height:16px;flex-shrink:0; }
+    .nav-badge { margin-left:auto;background:#14b8a6;color:white;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px; }
+    .sidebar-user { padding:14px 16px;border-top:1px solid #21262d;display:flex;align-items:center;gap:8px; }
+    .user-avatar { width:28px;height:28px;background:#14b8a6;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:700;flex-shrink:0; }
+    .user-name { color:#d1d5db;font-size:12px;font-weight:500; }
+    .user-role { color:#6b7280;font-size:10px; }
+
+    /* ── Main area ───────────────────────────── */
+    .main-wrap { flex:1;display:flex;flex-direction:column;overflow:hidden; }
+    .topbar { background:white;border-bottom:1px solid #e5e7eb;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0; }
+    .topbar-title { font-size:15px;font-weight:600;color:#111827; }
+    .topbar-sub   { font-size:12px;color:#9ca3af;margin-top:1px; }
+    .topbar-actions { display:flex;align-items:center;gap:8px; }
+    main { flex:1;overflow-y:auto;padding:24px; }
+
+    /* ── Components ─────────────────────────── */
+    .card { background:white;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,.04); }
+
+    .btn,.btn-primary,.btn-ghost,.btn-danger { display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:500;padding:7px 14px;border-radius:8px;border:none;cursor:pointer;text-decoration:none;transition:all .15s; }
+    .btn-primary { background:#14b8a6;color:white; }
+    .btn-primary:hover { background:#0d9488; }
+    .btn-primary:disabled { opacity:.6;cursor:not-allowed; }
+    .btn-ghost   { background:white;color:#374151;border:1px solid #e5e7eb; }
+    .btn-ghost:hover { background:#f9fafb; }
+    .btn-danger  { background:#fef2f2;color:#dc2626;border:1px solid #fecaca; }
+    .btn-danger:hover { background:#fee2e2; }
+    .btn-sm { font-size:12px;padding:5px 10px;border-radius:6px; }
+
+    .badge { display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500; }
+    .badge-teal   { background:#f0fdfa;color:#0d9488; }
+    .badge-blue   { background:#eff6ff;color:#2563eb; }
+    .badge-violet { background:#f5f3ff;color:#7c3aed; }
+    .badge-amber  { background:#fffbeb;color:#d97706; }
+    .badge-slate  { background:#f8fafc;color:#475569; }
+    .badge-green  { background:#f0fdf4;color:#16a34a; }
+    .badge-gray   { background:#f3f4f6;color:#6b7280; }
+    .badge-red    { background:#fef2f2;color:#dc2626; }
+
+    th { font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;padding:10px 14px;text-align:left;white-space:nowrap; }
+    td { padding:10px 14px;font-size:13px;color:#374151;vertical-align:top; }
+    tr:hover td { background:#fafafa; }
+
+    input, select, textarea { font-size:13px;border:1px solid #e5e7eb;border-radius:8px;padding:7px 12px;outline:none;background:white;color:#111827; }
+    input:focus, select:focus, textarea:focus { border-color:#14b8a6;box-shadow:0 0 0 2px rgba(20,184,166,.15); }
+
+    .stat-card { background:white;border-radius:12px;border:1px solid #e5e7eb;padding:20px; }
+    .stat-label { font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em; }
+    .stat-value { font-size:32px;font-weight:700;color:#111827;margin:8px 0 4px; }
+    .stat-link  { font-size:12px;color:#14b8a6;text-decoration:none; }
+    .stat-link:hover { text-decoration:underline; }
+    .stat-icon  { width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center; }
+
+    .line-clamp-2 { display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden; }
+    .animate-spin { animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- ── Sidebar ─────────────────────────────────────────────── -->
+<aside>
+  <div class="logo-area">
+    <div class="logo-icon">SH</div>
+    <div>
+      <div class="logo-name">Scraper Hub</div>
+      <div class="logo-sub">Sports Intel</div>
+    </div>
+  </div>
+
+  <nav>
+    <div class="nav-section">General</div>
+
+    <a href="/" class="nav-item {% if active_page=='dashboard' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Dashboard
+    </a>
+
+    <a href="/sites" class="nav-item {% if active_page=='sites' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+      Sitios
+    </a>
+
+    <a href="/news" class="nav-item {% if active_page=='news' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 9h16"/><path d="M8 4v5"/></svg>
+      Noticias
+    </a>
+
+    <a href="/aggregated" class="nav-item {% if active_page=='aggregated' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      Agregado
+    </a>
+
+    <a href="/email" class="nav-item {% if active_page=='email' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      Correos
+    </a>
+
+    <div class="nav-section">Config</div>
+
+    <a href="/settings" class="nav-item {% if active_page=='settings' %}nav-active{% else %}nav-idle{% endif %}">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Ajustes
+    </a>
+  </nav>
+
+  <div class="sidebar-user">
+    <div class="user-avatar">OE</div>
+    <div>
+      <div class="user-name">Oriol E.</div>
+      <div class="user-role">Admin</div>
+    </div>
+  </div>
+</aside>
+
+<!-- ── Main ────────────────────────────────────────────────── -->
+<div class="main-wrap">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">{% block page_title %}{% endblock %}</div>
+      <div class="topbar-sub">{% block page_sub %}{% endblock %}</div>
+    </div>
+    <div class="topbar-actions">{% block header_actions %}{% endblock %}</div>
+  </div>
+  <main>{% block content %}{% endblock %}</main>
+</div>
+
+</body>
+</html>

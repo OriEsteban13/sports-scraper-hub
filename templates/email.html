@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Correos · Scraper Hub{% endblock %}
+{% block page_title %}Compositor de Correos{% endblock %}
+{% block page_sub %}Selecciona artículos y genera el correo{% endblock %}
+
+{% block content %}
+<div x-data="emailComposer()" x-init="init()" class="flex gap-4 h-full">
+
+  <!-- Left: article selector -->
+  <div class="w-80 shrink-0 flex flex-col gap-3">
+    <div class="card overflow-hidden flex flex-col" style="max-height: calc(100vh - 180px)">
+      <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-800">Artículos de Hoy</h2>
+        <span class="badge bg-teal-50 text-teal-700" x-text="pickedIds.size + ' sel.'"></span>
+      </div>
+      <div class="overflow-y-auto divide-y divide-gray-100 flex-1">
+        {% for a in today_articles %}
+        <label class="flex items-start gap-2.5 px-4 py-3 hover:bg-gray-50 cursor-pointer"
+               :class="pickedIds.has({{ a.id }}) && 'bg-teal-50/60'">
+          <input type="checkbox" class="mt-0.5 w-4 h-4 rounded text-teal-500 shrink-0"
+                 value="{{ a.id }}"
+                 :checked="pickedIds.has({{ a.id }})"
+                 @change="toggleArticle({{ a.id }}, {
+                   id: {{ a.id }},
+                   title: {{ a.title | tojson }},
+                   url: {{ (a.article_url or '') | tojson }},
+                   property: {{ (a.company_property or '') | tojson }},
+                   brand: {{ (a.company_brand or '') | tojson }},
+                   agency: {{ (a.company_agency or '') | tojson }},
+                   summary: {{ (a.summary or '') | tojson }},
+                   site: {{ a.site_name | tojson }},
+                   category: {{ (a.category or '') | tojson }}
+                 })">
+          <div class="min-w-0">
+            {% if a.category %}<span class="badge bg-slate-100 text-slate-500 text-[10px] mb-0.5">{{ a.category }}</span>{% endif %}
+            <p class="text-xs text-gray-700 line-clamp-2 leading-snug">{{ a.title }}</p>
+            {% if a.company_brand %}<p class="text-[10px] text-violet-600 mt-0.5">{{ a.company_brand }}</p>{% endif %}
+          </div>
+        </label>
+        {% else %}
+        <div class="px-4 py-8 text-center text-gray-400 text-sm">
+          Sin artículos hoy.
+          <form method="post" action="/scrape-all" class="mt-2">
+            <button class="btn-primary text-xs px-3 py-1.5">Scrapar ahora</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: composer -->
+  <div class="flex-1 flex flex-col gap-3">
+
+    <!-- To / Subject -->
+    <div class="card px-5 py-4 grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Para (destinatario)</label>
+        <input x-model="recipients" type="email" multiple placeholder="correo@ejemplo.com"
+               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Asunto</label>
+        <input x-model="subject" placeholder="Ej: Resumen sports business — 6 mayo 2026"
+               class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+      </div>
+    </div>
+
+    <!-- Preview -->
+    <div class="card flex-1 overflow-hidden flex flex-col">
+      <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+        <div class="flex gap-2">
+          <button @click="mode='preview'" :class="mode==='preview' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-gray-400 hover:text-gray-600'"
+                  class="text-sm font-medium pb-1 px-1">Vista previa</button>
+          <button @click="mode='html'" :class="mode==='html' ? 'text-teal-600 border-b-2 border-teal-500' : 'text-gray-400 hover:text-gray-600'"
+                  class="text-sm font-medium pb-1 px-1">HTML</button>
+        </div>
+        <div class="flex gap-2">
+          <button @click="copyHtml()" class="btn-ghost text-xs px-3 py-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copiar HTML
+          </button>
+          <a :href="mailtoLink()" class="btn-primary text-xs px-3 py-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            Abrir en correo
+          </a>
+          <button @click="logEmail()" class="btn-ghost text-xs px-3 py-1.5 text-green-600 border-green-200">
+            Registrar envío
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview mode -->
+      <div x-show="mode==='preview'" class="flex-1 overflow-auto p-5">
+        <div x-show="pickedIds.size === 0" class="flex flex-col items-center justify-center h-full text-gray-300 gap-3">
+          <svg class="w-12 h-12" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <p class="text-sm">Selecciona artículos a la izquierda</p>
+        </div>
+        <div x-show="pickedIds.size > 0" x-html="buildPreview()" class="prose prose-sm max-w-none"></div>
+      </div>
+
+      <!-- HTML mode -->
+      <div x-show="mode==='html'" class="flex-1 overflow-auto p-5">
+        <textarea class="w-full h-full text-xs font-mono border border-gray-200 rounded-lg p-3 focus:outline-none resize-none"
+                  readonly :value="buildHtml()"></textarea>
+      </div>
+    </div>
+
+    <!-- Saved notification -->
+    <div x-show="saved" x-cloak class="card px-4 py-3 bg-green-50 border-green-200 flex items-center gap-2 text-green-700 text-sm">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+      Correo registrado correctamente
+    </div>
+  </div>
+</div>
+
+<!-- Email log -->
+{% if email_logs %}
+<div class="mt-6 card overflow-hidden">
+  <div class="px-5 py-3 border-b border-gray-100">
+    <h2 class="text-sm font-semibold text-gray-800">Historial de envíos</h2>
+  </div>
+  <table class="w-full">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="th">Asunto</th>
+        <th class="th">Destinatario</th>
+        <th class="th w-36">Fecha</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for log in email_logs %}
+      <tr class="hover:bg-gray-50">
+        <td class="td text-sm">{{ log.subject or '(sin asunto)' }}</td>
+        <td class="td text-xs text-gray-500">{{ log.recipients or '—' }}</td>
+        <td class="td text-xs text-gray-400">{{ log.sent_at[:16].replace('T',' ') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+function emailComposer() {
+  const preSelected = {{ selected_articles | map(attribute='id') | list | tojson }};
+  const preData = {
+    {% for a in selected_articles %}
+    {{ a.id }}: {
+      id: {{ a.id }},
+      title: {{ a.title | tojson }},
+      url: {{ (a.article_url or '') | tojson }},
+      property: {{ (a.company_property or '') | tojson }},
+      brand: {{ (a.company_brand or '') | tojson }},
+      agency: {{ (a.company_agency or '') | tojson }},
+      summary: {{ (a.summary or '') | tojson }},
+      site: {{ a.site_name | tojson }},
+      category: {{ (a.category or '') | tojson }}
+    },
+    {% endfor %}
+  };
+  return {
+    mode: 'preview',
+    recipients: '',
+    subject: 'Resumen Sports Business — ' + new Date().toLocaleDateString('es-ES', {day:'numeric',month:'long',year:'numeric'}),
+    pickedIds: new Set(),
+    articles: {},
+    saved: false,
+    init() {
+      preSelected.forEach(id => {
+        this.pickedIds.add(id);
+        this.articles[id] = preData[id];
+      });
+    },
+    toggleArticle(id, data) {
+      if (this.pickedIds.has(id)) { this.pickedIds.delete(id); delete this.articles[id]; }
+      else { this.pickedIds.add(id); this.articles[id] = data; }
+      // Alpine reactivity workaround
+      this.pickedIds = new Set(this.pickedIds);
+    },
+    buildHtml() {
+      const rows = Object.values(this.articles).map(a => `
+        <tr>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:13px">
+            <a href="${a.url}" style="color:#0d9488;text-decoration:none;font-weight:500">${a.title}</a>
+            ${a.summary ? `<br><span style="color:#6b7280;font-size:11px">${a.summary}</span>` : ''}
+          </td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#3b82f6">${a.property || '—'}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#8b5cf6">${a.brand || '—'}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-size:12px;color:#f59e0b">${a.agency || '—'}</td>
+        </tr>`).join('');
+      return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:sans-serif;background:#f8fafc;padding:24px">
+<div style="max-width:800px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
+  <div style="background:#0d1117;padding:20px 24px">
+    <h1 style="color:white;font-size:18px;margin:0">${this.subject}</h1>
+    <p style="color:#6b7280;font-size:12px;margin:4px 0 0">Scraper Hub · Sports Intel</p>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="background:#f8fafc">
+        <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;border-bottom:2px solid #e5e7eb">Titular</th>
+        <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#3b82f6;border-bottom:2px solid #e5e7eb;width:120px">Propiedad</th>
+        <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#8b5cf6;border-bottom:2px solid #e5e7eb;width:120px">Marca</th>
+        <th style="padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#f59e0b;border-bottom:2px solid #e5e7eb;width:100px">Agencia</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div style="padding:16px 24px;background:#f8fafc;border-top:1px solid #e5e7eb">
+    <p style="color:#9ca3af;font-size:11px;margin:0">Generado con Scraper Hub · ${new Date().toLocaleDateString('es-ES')}</p>
+  </div>
+</div>
+</body></html>`;
+    },
+    buildPreview() {
+      const arts = Object.values(this.articles);
+      if (!arts.length) return '';
+      return `<div style="font-family:sans-serif">
+        <h2 style="font-size:16px;font-weight:600;margin:0 0 12px">${this.subject}</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f8fafc">
+              <th style="padding:8px;text-align:left;color:#6b7280;font-size:11px;border-bottom:2px solid #e5e7eb">TITULAR</th>
+              <th style="padding:8px;text-align:left;color:#3b82f6;font-size:11px;border-bottom:2px solid #e5e7eb;width:110px">PROPIEDAD</th>
+              <th style="padding:8px;text-align:left;color:#8b5cf6;font-size:11px;border-bottom:2px solid #e5e7eb;width:110px">MARCA</th>
+              <th style="padding:8px;text-align:left;color:#f59e0b;font-size:11px;border-bottom:2px solid #e5e7eb;width:90px">AGENCIA</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${arts.map(a=>`<tr style="border-bottom:1px solid #f3f4f6">
+              <td style="padding:8px 8px 8px 0">
+                <a href="${a.url}" target="_blank" style="color:#0d9488;font-weight:500;text-decoration:none">${a.title}</a>
+                ${a.summary?`<br><span style="color:#9ca3af;font-size:11px">${a.summary}</span>`:''}
+              </td>
+              <td style="padding:8px;color:#3b82f6;font-size:12px">${a.property||'—'}</td>
+              <td style="padding:8px;color:#8b5cf6;font-size:12px">${a.brand||'—'}</td>
+              <td style="padding:8px;color:#f59e0b;font-size:12px">${a.agency||'—'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    },
+    mailtoLink() {
+      const body = Object.values(this.articles).map((a,i) =>
+        `${i+1}. ${a.title}\n   Propiedad: ${a.property||'—'} | Marca: ${a.brand||'—'} | Agencia: ${a.agency||'—'}\n   ${a.url}\n   ${a.summary||''}`
+      ).join('\n\n');
+      return `mailto:${this.recipients}?subject=${encodeURIComponent(this.subject)}&body=${encodeURIComponent(body)}`;
+    },
+    async copyHtml() {
+      await navigator.clipboard.writeText(this.buildHtml());
+      alert('HTML copiado al portapapeles');
+    },
+    async logEmail() {
+      const fd = new FormData();
+      fd.append('subject', this.subject);
+      fd.append('recipients', this.recipients);
+      fd.append('article_ids', Array.from(this.pickedIds).join(','));
+      fd.append('body', this.buildHtml());
+      await fetch('/email/log', { method:'POST', body: fd });
+      this.saved = true;
+      setTimeout(() => this.saved = false, 3000);
+    }
+  }
+}
+</script>
+{% endblock %}

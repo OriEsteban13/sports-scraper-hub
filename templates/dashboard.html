@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Scraper Hub{% endblock %}
+{% block page_title %}Buenos días, Oriol{% endblock %}
+{% block page_sub %}{{ today }} · Sports Scraper Hub{% endblock %}
+
+{% block header_actions %}
+<form method="post" action="/scrape-all" x-data="{l:false}" @submit="l=true" style="display:inline">
+  <button type="submit" class="btn btn-primary" :disabled="l">
+    <svg style="width:14px;height:14px" :style="l&&'animation:spin 1s linear infinite'" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+    <span x-text="l?'Scrapeando...':'Scrapar Todo'">Scrapar Todo</span>
+  </button>
+</form>
+<a href="/sites" class="btn btn-ghost">
+  <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  Añadir Sitio
+</a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Search bar (redirects to /news?q=...) -->
+<form method="get" action="/news" class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px">
+  <svg style="width:18px;height:18px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <input type="text" name="q" placeholder="Buscar en titulares, contenido, marcas, propiedades..."
+         style="flex:1;border:none;outline:none;font-size:14px;color:#111827;background:transparent" autocomplete="off">
+  <button type="submit" class="btn-primary" style="font-size:12px;padding:6px 14px">Buscar →</button>
+</form>
+
+<!-- Stats -->
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
+
+  <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div class="stat-label">Sitios Activos</div>
+      <div class="stat-icon" style="background:#f0fdfa">
+        <svg style="width:18px;height:18px;color:#0d9488" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10"/></svg>
+      </div>
+    </div>
+    <div class="stat-value">{{ stats.sites }}</div>
+    <a href="/sites" class="stat-link">Ver sitios →</a>
+  </div>
+
+  <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div class="stat-label">Artículos Hoy</div>
+      <div class="stat-icon" style="background:#eff6ff">
+        <svg style="width:18px;height:18px;color:#2563eb" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 9h16"/></svg>
+      </div>
+    </div>
+    <div class="stat-value">{{ stats.today }}</div>
+    <a href="/news" class="stat-link">Ver noticias →</a>
+  </div>
+
+  <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div class="stat-label">Total Artículos</div>
+      <div class="stat-icon" style="background:#f5f3ff">
+        <svg style="width:18px;height:18px;color:#7c3aed" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </div>
+    </div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <a href="/aggregated" class="stat-link">Ver agregado →</a>
+  </div>
+
+  <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div class="stat-label">Correos Enviados</div>
+      <div class="stat-icon" style="background:#fffbeb">
+        <svg style="width:18px;height:18px;color:#d97706" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      </div>
+    </div>
+    <div class="stat-value">{{ stats.emails }}</div>
+    <a href="/email" class="stat-link">Ver correos →</a>
+  </div>
+
+</div>
+
+<!-- Two columns -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+  <!-- Sites -->
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:13px;font-weight:600;color:#111827">Sitios Registrados</span>
+      <a href="/sites" style="font-size:12px;color:#14b8a6;text-decoration:none">Gestionar →</a>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead style="background:#fafafa">
+        <tr><th>Sitio</th><th style="text-align:center">Hoy</th><th>Último scrape</th><th style="text-align:center">Acción</th></tr>
+      </thead>
+      <tbody>
+        {% for s in sites %}
+        <tr>
+          <td>
+            <div style="font-weight:500;font-size:13px;color:#111827">{{ s.name }}</div>
+            <div style="font-size:11px;color:#9ca3af;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.url }}</div>
+          </td>
+          <td style="text-align:center">
+            <span class="badge {% if s.today_count > 0 %}badge-teal{% else %}badge-gray{% endif %}">{{ s.today_count }}</span>
+          </td>
+          <td style="font-size:11px;color:#9ca3af">
+            {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}—{% endif %}
+          </td>
+          <td style="text-align:center">
+            <form method="post" action="/sites/{{ s.id }}/scrape" x-data="{l:false}" @submit="l=true" style="display:inline">
+              <button type="submit" class="btn btn-sm" style="color:#14b8a6;background:none;border:none;cursor:pointer;padding:4px 8px" :disabled="l">
+                <span x-text="l?'...':'Scrapar'">Scrapar</span>
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" style="padding:32px;text-align:center;color:#9ca3af;font-size:13px">
+          No hay sitios. <a href="/sites" style="color:#14b8a6">Añadir →</a>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Recent articles -->
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:13px;font-weight:600;color:#111827">Artículos de Hoy</span>
+      <a href="/news" style="font-size:12px;color:#14b8a6;text-decoration:none">Ver todos →</a>
+    </div>
+    <div>
+      {% for a in recent %}
+      <div style="padding:10px 18px;border-bottom:1px solid #f9fafb;display:flex;align-items:flex-start;gap:8px">
+        {% if a.category %}<span class="badge badge-slate" style="flex-shrink:0;margin-top:1px">{{ a.category }}</span>{% endif %}
+        <div style="min-width:0">
+          <a href="{{ a.article_url }}" target="_blank" style="font-size:13px;color:#111827;text-decoration:none;display:block" class="line-clamp-2">{{ a.title }}</a>
+          <div style="font-size:11px;color:#9ca3af;margin-top:2px">{{ a.site_name }}</div>
+        </div>
+      </div>
+      {% else %}
+      <div style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">
+        Sin artículos hoy.
+        <form method="post" action="/scrape-all" style="display:inline;margin-left:4px">
+          <button style="color:#14b8a6;background:none;border:none;cursor:pointer;font-size:13px">Scrapar ahora →</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
