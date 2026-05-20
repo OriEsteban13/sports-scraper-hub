@@ -2,7 +2,7 @@
 
 {% block title %}Agregado · Scraper Hub{% endblock %}
 {% block page_title %}Agregado{% endblock %}
-{% block page_sub %}Historial completo de artículos · {{ total }} resultados{% endblock %}
+{% block page_sub %}Historial completo de artículos · {{ total | fmtnum }} resultados{% endblock %}
 
 {% block header_actions %}
   <a href="/email" class="btn-ghost">
@@ -61,6 +61,7 @@
         <th class="th">Titular</th>
         <th class="th w-24">Fecha</th>
         <th class="th w-24">Sitio</th>
+        <th class="th w-20" title="OTS = visitas diarias estimadas del medio">OTS</th>
         <th class="th w-32">Propiedad</th>
         <th class="th w-32">Marca</th>
         <th class="th w-28">Agencia</th>
@@ -84,6 +85,13 @@
         </td>
         <td class="td text-xs text-gray-400">{{ a.scrape_date }}</td>
         <td class="td text-xs text-gray-500">{{ a.site_name }}</td>
+        <td class="td text-xs">
+          {% set ots = (a.site_monthly_visits or 0) // 30 %}
+          {% if ots >= 1000000 %}<span class="text-teal-600 font-semibold">{{ "%.1f"|format(ots/1000000) }}M</span>
+          {% elif ots >= 1000 %}<span class="text-teal-600 font-semibold">{{ "%.1f"|format(ots/1000) }}K</span>
+          {% elif ots %}<span class="text-gray-600">{{ ots }}</span>
+          {% else %}<span class="text-gray-300">—</span>{% endif %}
+        </td>
         <td class="td">
           {% if a.company_property %}
           <span class="badge bg-blue-50 text-blue-700 text-xs">{{ a.company_property }}</span>
@@ -104,7 +112,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="td text-center py-16 text-gray-400">
+      <tr><td colspan="9" class="td text-center py-16 text-gray-400">
         <div class="flex flex-col items-center gap-2">
           <svg class="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
           <p>Sin resultados{% if search_q %} para «{{ search_q }}»{% endif %}</p>
@@ -118,7 +126,7 @@
 <!-- Pagination -->
 {% if total_pages > 1 %}
 <div class="flex items-center justify-between">
-  <p class="text-sm text-gray-500">Mostrando {{ (page-1)*per_page+1 }}–{{ [page*per_page, total]|min }} de {{ total }}</p>
+  <p class="text-sm text-gray-500">Mostrando {{ ((page-1)*per_page+1) | fmtnum }}–{{ ([page*per_page, total]|min) | fmtnum }} de {{ total | fmtnum }}</p>
   <div class="flex gap-1">
     {% if page > 1 %}
     <a href="?page={{ page-1 }}{% if search_q %}&q={{ search_q }}{% endif %}{% if filter_site %}&site_id={{ filter_site }}{% endif %}{% if filter_category %}&category={{ filter_category }}{% endif %}"

@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} · Clientes · Scraper Hub{% endblock %}
+{% block page_title %}{{ client.name }}{% endblock %}
+{% block page_sub %}Búsquedas activas · últimos {{ days }} días{% if client.notes %} · {{ client.notes }}{% endif %}{% endblock %}
+
+{% block header_actions %}
+  <a href="/clients" class="btn-ghost">← Volver</a>
+  <a href="/clients/{{ client.id }}/export.xlsx" class="btn-ghost" title="Exportar Excel completo del cliente">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Excel
+  </a>
+  <button onclick="document.getElementById('edit_client_modal').style.display='flex'" class="btn-ghost">
+    <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4z"/></svg>
+    Editar cliente
+  </button>
+  <button onclick="document.getElementById('new_search_modal').style.display='flex'" class="btn-primary">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Nueva búsqueda
+  </button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Universe scope banner -->
+{% if universe.configured %}
+<div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;align-items:center;gap:14px;background:#fffbeb;border-color:#fde68a">
+  <svg style="width:18px;height:18px;color:#d97706;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:12px;font-weight:600;color:#92400e">
+      Universo del cliente: <b>{{ "{:,}".format(universe.total).replace(",", ".") }}</b> noticias en 30 días
+      <span style="color:#b45309;font-weight:400">· las marcas se buscan dentro de este universo</span>
+    </div>
+    <div style="font-size:11px;color:#78350f;margin-top:2px;line-height:1.4">
+      Keywords: {% for k in client.keywords.split(',') %}<code style="background:#fde68a;padding:1px 6px;border-radius:3px;margin-right:4px">{{ k.strip() }}</code>{% endfor %}
+    </div>
+  </div>
+  <button onclick="document.getElementById('edit_client_modal').style.display='flex'" class="btn-ghost btn-sm">Editar</button>
+</div>
+{% else %}
+<div class="card" style="padding:14px 18px;margin-bottom:14px;display:flex;align-items:center;gap:14px;background:#fef2f2;border-color:#fecaca">
+  <svg style="width:20px;height:20px;color:#dc2626;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+  </svg>
+  <div style="flex:1">
+    <div style="font-size:13px;font-weight:600;color:#991b1b">Sin keywords del cliente</div>
+    <div style="font-size:11px;color:#7f1d1d;margin-top:2px">Define las palabras clave del cliente para acotar el universo de noticias en el que buscar las marcas.</div>
+  </div>
+  <button onclick="document.getElementById('edit_client_modal').style.display='flex'" class="btn-primary btn-sm">Configurar keywords</button>
+</div>
+{% endif %}
+
+<!-- Aggregate KPI cards (cliente nivel) -->
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:18px">
+  <div class="stat-card">
+    <div class="stat-label">Universo (30d)</div>
+    <div class="stat-value" style="color:#d97706">
+      {% if universe.configured %}{{ "{:,}".format(universe.total).replace(",", ".") }}{% else %}—{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">{{ universe.today }} hoy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Búsquedas</div>
+    <div class="stat-value">{{ searches|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ searches|sum(attribute='brand_count') }} marcas total</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Menciones marca</div>
+    <div class="stat-value" style="color:#0d9488">{{ "{:,}".format(agg.total).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ agg.today }} hoy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">OTS marcas</div>
+    <div class="stat-value" style="color:#2563eb">
+      {% if agg.ots >= 1000000 %}{{ "%.1f"|format(agg.ots/1000000) }}M
+      {% elif agg.ots >= 1000 %}{{ "%.0f"|format(agg.ots/1000) }}K
+      {% else %}{{ agg.ots }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">impresiones</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">VPE marcas</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% if agg.vpe >= 1000000 %}{{ "%.1f"|format(agg.vpe/1000000) }}M€
+      {% elif agg.vpe >= 1000 %}{{ "%.1f"|format(agg.vpe/1000) }}K€
+      {% else %}{{ "%.0f"|format(agg.vpe) }}€{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">€ pub. equivalente</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Países activos</div>
+    <div class="stat-value" style="color:#16a34a">{{ agg.by_country|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ agg.by_category|length }} tipos medio</div>
+  </div>
+</div>
+
+<!-- Searches grid -->
+{% if searches %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px;margin-bottom:18px">
+  {% for s in searches %}
+  <div class="card" style="overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(to right, #f0fdfa, white)">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">
+        <svg style="width:18px;height:18px;color:#0d9488;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+        </svg>
+        <a href="/clients/{{ client.id }}/searches/{{ s.id }}"
+           style="font-size:14px;font-weight:600;color:#111827;text-decoration:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.name }}</a>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <span class="badge badge-slate" style="font-size:10px">{{ s.brand_count }} {{ 'marca' if s.brand_count == 1 else 'marcas' }}</span>
+        <form method="post" action="/clients/{{ client.id }}/searches/{{ s.id }}/delete" style="display:inline"
+              onsubmit="return confirm('¿Borrar la búsqueda «{{ s.name }}» y todas sus marcas?')">
+          <button type="submit" class="btn-danger btn-sm" style="padding:2px 6px">×</button>
+        </form>
+      </div>
+    </div>
+
+    {% if s.keywords %}
+    <div style="padding:6px 18px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:6px">
+      <svg style="width:11px;height:11px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      {% for k in s.keywords.split(',')[:4] %}<code style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px">{{ k.strip() }}</code>{% endfor %}
+      {% if s.keywords.split(',')|length > 4 %}<span style="color:#9ca3af;font-size:10px">+{{ s.keywords.split(',')|length - 4 }}</span>{% endif %}
+    </div>
+    {% elif s.notes %}
+    <div style="padding:8px 18px;font-size:11px;color:#6b7280;background:#fafafa;border-bottom:1px solid #f3f4f6">{{ s.notes }}</div>
+    {% endif %}
+
+    <!-- Mini KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);padding:14px 18px;gap:12px;border-bottom:1px solid #f3f4f6">
+      <div>
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:600">Menciones</div>
+        <div style="font-size:18px;font-weight:600;color:#0d9488;margin-top:2px">{{ s.agg.total }}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:600">OTS</div>
+        <div style="font-size:18px;font-weight:600;color:#2563eb;margin-top:2px">
+          {% if s.agg.ots >= 1000000 %}{{ "%.1f"|format(s.agg.ots/1000000) }}M
+          {% elif s.agg.ots >= 1000 %}{{ "%.0f"|format(s.agg.ots/1000) }}K
+          {% else %}{{ s.agg.ots }}{% endif %}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:600">VPE</div>
+        <div style="font-size:18px;font-weight:600;color:#7c3aed;margin-top:2px">
+          {% if s.agg.vpe >= 1000000 %}{{ "%.1f"|format(s.agg.vpe/1000000) }}M€
+          {% elif s.agg.vpe >= 1000 %}{{ "%.1f"|format(s.agg.vpe/1000) }}K€
+          {% else %}{{ "%.0f"|format(s.agg.vpe) }}€{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Brand chips -->
+    <div style="padding:12px 18px;flex:1">
+      {% if s.brands %}
+        <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:6px">Marcas</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          {% for b in s.brands[:8] %}
+          <span class="badge badge-blue" style="font-size:11px">{{ b.name }} <span style="color:#9ca3af;margin-left:3px">{{ b.kpis.total }}</span></span>
+          {% endfor %}
+          {% if s.brands|length > 8 %}<span class="badge badge-gray" style="font-size:11px">+{{ s.brands|length - 8 }}</span>{% endif %}
+        </div>
+      {% else %}
+        <div style="font-size:11px;color:#9ca3af;font-style:italic">Sin marcas todavía. <a href="/clients/{{ client.id }}/searches/{{ s.id }}" style="color:#14b8a6">Añadir →</a></div>
+      {% endif %}
+    </div>
+
+    <a href="/clients/{{ client.id }}/searches/{{ s.id }}"
+       style="padding:10px 18px;border-top:1px solid #f3f4f6;background:#fafafa;font-size:12px;color:#14b8a6;text-decoration:none;text-align:center;font-weight:500">
+      Abrir búsqueda →
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card" style="padding:48px;text-align:center;color:#9ca3af">
+  <svg style="width:48px;height:48px;margin:0 auto 12px;color:#d1d5db" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+  </svg>
+  <div style="font-size:14px;color:#6b7280;margin-bottom:6px">Sin búsquedas todavía</div>
+  <div style="font-size:12px">Crea la primera con el botón <b>Nueva búsqueda</b> arriba a la derecha.</div>
+  <div style="font-size:11px;margin-top:12px;color:#9ca3af">
+    Una búsqueda es una carpeta donde agrupar marcas relacionadas (ej: «Patrocinios», «Competencia», «Equipo masculino»).
+  </div>
+</div>
+{% endif %}
+
+{% if agg.by_country %}
+<!-- Aggregated distribution across all searches -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px;font-weight:600;color:#111827">Distribución por país (agregado)</span>
+      <span style="font-size:11px;color:#9ca3af;margin-left:8px">todas las búsquedas</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa">
+        <tr>
+          <th style="padding:8px 14px">País</th>
+          <th style="padding:8px;text-align:right">Menc.</th>
+          <th style="padding:8px;text-align:right">OTS</th>
+          <th style="padding:8px 14px;text-align:right">VPE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_c = (agg.by_country | map(attribute='count') | max) or 1 %}
+        {% for c in agg.by_country %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:8px 14px">
+            <span style="font-size:14px">{{ c.flag }}</span>
+            <span style="margin-left:6px">{{ c.name }}</span>
+            <span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ c.sites }})</span>
+          </td>
+          <td style="padding:8px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+              <div style="width:40px;height:4px;background:#f0fdfa;border-radius:2px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (c.count / max_c * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-weight:500">{{ c.count }}</span>
+            </div>
+          </td>
+          <td style="padding:8px;text-align:right;color:#2563eb;font-weight:500">
+            {% if c.ots >= 1000000 %}{{ "%.1f"|format(c.ots/1000000) }}M
+            {% elif c.ots >= 1000 %}{{ "%.0f"|format(c.ots/1000) }}K
+            {% else %}{{ c.ots }}{% endif %}
+          </td>
+          <td style="padding:8px 14px;text-align:right;color:#7c3aed;font-weight:500">
+            {% if c.vpe >= 1000 %}{{ "%.1f"|format(c.vpe/1000) }}K€
+            {% else %}{{ "%.0f"|format(c.vpe) }}€{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px;font-weight:600;color:#111827">Por tipo de medio (agregado)</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa">
+        <tr>
+          <th style="padding:8px 14px">Categoría</th>
+          <th style="padding:8px;text-align:right">Menc.</th>
+          <th style="padding:8px;text-align:right">OTS</th>
+          <th style="padding:8px 14px;text-align:right">VPE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_c2 = (agg.by_category | map(attribute='count') | max) or 1 %}
+        {% for cat in agg.by_category %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:8px 14px">
+            <span class="badge badge-blue" style="font-size:11px">{{ cat.name }}</span>
+            <span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ cat.sites }} medios)</span>
+          </td>
+          <td style="padding:8px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+              <div style="width:40px;height:4px;background:#eff6ff;border-radius:2px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#2563eb;width:{{ (cat.count / max_c2 * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-weight:500">{{ cat.count }}</span>
+            </div>
+          </td>
+          <td style="padding:8px;text-align:right;color:#2563eb;font-weight:500">
+            {% if cat.ots >= 1000000 %}{{ "%.1f"|format(cat.ots/1000000) }}M
+            {% elif cat.ots >= 1000 %}{{ "%.0f"|format(cat.ots/1000) }}K
+            {% else %}{{ cat.ots }}{% endif %}
+          </td>
+          <td style="padding:8px 14px;text-align:right;color:#7c3aed;font-weight:500">
+            {% if cat.vpe >= 1000 %}{{ "%.1f"|format(cat.vpe/1000) }}K€
+            {% else %}{{ "%.0f"|format(cat.vpe) }}€{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Edit client modal -->
+<div id="edit_client_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:540px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Editar cliente</h2>
+      <button onclick="document.getElementById('edit_client_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form method="post" action="/clients/{{ client.id }}/edit" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre *</label>
+        <input name="name" required value="{{ client.name }}"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">
+          Palabras clave (universo del cliente) *
+          <span style="color:#9ca3af;font-weight:400">— separadas por comas</span>
+        </label>
+        <textarea name="keywords" rows="3" required
+                  placeholder="Ej: FC Barcelona, Barça, FCB, Camp Nou"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical">{{ client.keywords or '' }}</textarea>
+        <p style="font-size:11px;color:#6b7280;margin-top:4px;line-height:1.5">
+          Las marcas se buscarán <b>solo dentro</b> de noticias que contengan alguna de estas palabras (coincidencia parcial en titular, cuerpo, propiedad, marca, agencia).
+        </p>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas</label>
+        <textarea name="notes" rows="2"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical">{{ client.notes or '' }}</textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('edit_client_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar cambios</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- New search modal -->
+<div id="new_search_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:520px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Nueva búsqueda en {{ client.name }}</h2>
+      <button onclick="document.getElementById('new_search_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form method="post" action="/clients/{{ client.id }}/searches" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre de la búsqueda *</label>
+        <input name="name" required placeholder="Ej: Supercopa, Copa del Rey, Liga..."
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">
+          Keywords de la búsqueda *
+          <span style="color:#9ca3af;font-weight:400">— separadas por comas</span>
+        </label>
+        <textarea name="keywords" rows="2" required
+                  placeholder="Ej: Supercopa, Supercopa de España"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical"></textarea>
+        <p style="font-size:11px;color:#6b7280;margin-top:4px;line-height:1.5">
+          Define qué noticias forman el universo de esta búsqueda. Las marcas se buscarán <b>solo dentro</b> de estas noticias (y dentro del universo del cliente).
+        </p>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <textarea name="notes" rows="2" placeholder="Briefing, periodo, objetivo..."
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('new_search_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Crear búsqueda</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

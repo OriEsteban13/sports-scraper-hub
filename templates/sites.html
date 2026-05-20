@@ -5,6 +5,10 @@
 {% block page_sub %}Gestiona las páginas que se scrapean diariamente{% endblock %}
 
 {% block header_actions %}
+  <a href="/export/sites.xlsx" class="btn-ghost" title="Exportar Excel">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+    Excel
+  </a>
   <button onclick="document.getElementById('import_modal').style.display='flex'" class="btn-ghost">
     <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
     Importar lista
@@ -45,6 +49,26 @@
           <input name="url" type="url" required placeholder="https://www.ejemplo.com"
                  class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">Categoría</label>
+            <input name="category" placeholder="Ej: Sports B2B, General News" list="cat-list"
+                   class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+            <datalist id="cat-list">
+              <option value="Sports B2B"><option value="Sports News"><option value="General News">
+              <option value="Business"><option value="Technology"><option value="Entertainment">
+              <option value="Lifestyle"><option value="Local News">
+            </datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">País</label>
+            <select name="country" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+              {% for code, name, flag in countries %}
+              <option value="{{ code }}" {% if code=='WW' %}selected{% endif %}>{{ flag }} {{ name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
         <div>
           <label class="block text-xs font-medium text-gray-700 mb-1">Selector CSS <span class="text-gray-400 font-normal">(opcional)</span></label>
           <input name="css_selector" placeholder="Ej: .article-list, #news"
@@ -73,82 +97,692 @@
   </div>
 </div>
 
-<!-- Table -->
-<div class="card overflow-hidden">
-  <table class="w-full">
-    <thead class="bg-gray-50 border-b border-gray-100">
+<!-- ── KPI CARDS ── -->
+<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-bottom:16px">
+  <div class="stat-card">
+    <div class="stat-label">Total sitios</div>
+    <div class="stat-value">{{ stats.total }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Activos</div>
+    <div class="stat-value" style="color:#16a34a">{{ stats.active }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ stats.paused }} pausados</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Con error</div>
+    <div class="stat-value" style="color:{% if stats.errors > 0 %}#dc2626{% else %}#9ca3af{% endif %}">{{ stats.errors }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ stats.empty }} sin artículos</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Con tráfico</div>
+    <div class="stat-value" style="color:#0d9488">{{ stats.with_traffic }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ stats.without_traffic }} sin datos</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">% cobertura tráfico</div>
+    <div class="stat-value" style="color:#2563eb">{{ stats.traffic_pct }}%</div>
+    <div style="font-size:11px;color:#9ca3af">sitios con datos</div>
+  </div>
+  <div class="stat-card" style="grid-column:span 2">
+    <div class="stat-label">Visitas/mes totales</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% set v = stats.total_visits %}
+      {% if v >= 1000000000 %}{{ "%.1f"|format(v/1000000000)|replace(".",",") }}B
+      {% elif v >= 1000000 %}{{ "%.1f"|format(v/1000000)|replace(".",",") }}M
+      {% elif v >= 1000 %}{{ "%.0f"|format(v/1000) }}K
+      {% else %}{{ v | fmtnum }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">alcance agregado estimado</div>
+  </div>
+</div>
+
+<!-- ── DISTRIBUTIONS ── -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+  <!-- By country -->
+  <div class="card" style="overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:12px;font-weight:600;color:#111827">Distribución por país</span>
+      <span style="font-size:10px;color:#9ca3af">{{ by_country|length }} países</span>
+    </div>
+    <div style="max-height:220px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="position:sticky;top:0;background:#fafafa;border-bottom:1px solid #f3f4f6">
+          <tr>
+            <th style="padding:6px 14px;text-align:left;color:#6b7280;font-weight:600">País</th>
+            <th style="padding:6px 8px;text-align:right;color:#6b7280;font-weight:600">Sitios</th>
+            <th style="padding:6px 8px;text-align:right;color:#6b7280;font-weight:600">Activos</th>
+            <th style="padding:6px 14px;text-align:right;color:#6b7280;font-weight:600">Visitas/mes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set max_c = (by_country | map(attribute='total') | max) or 1 %}
+          {% for c in by_country %}
+          <tr style="border-top:1px solid #f3f4f6" class="hover:bg-gray-50" style="cursor:pointer" onclick="filterByCountry('{{ c.name }}')">
+            <td style="padding:6px 14px">
+              <span style="font-size:13px">{{ c.flag }}</span>
+              <span style="margin-left:5px;font-weight:500">{{ c.name }}</span>
+            </td>
+            <td style="padding:6px 8px;text-align:right">
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">
+                <div style="width:40px;height:3px;background:#f0fdfa;border-radius:2px;position:relative">
+                  <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (c.total / max_c * 100)|round|int }}%"></div>
+                </div>
+                <span style="font-weight:500;color:#111827">{{ c.total }}</span>
+              </div>
+            </td>
+            <td style="padding:6px 8px;text-align:right;color:#16a34a;font-weight:500">{{ c.active }}</td>
+            <td style="padding:6px 14px;text-align:right;color:#7c3aed;font-weight:500">
+              {% set v = c.visits %}
+              {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000)|replace(".",",") }}M
+              {% elif v >= 1000 %}{{ "%.0f"|format(v/1000) }}K
+              {% elif v > 0 %}{{ v | fmtnum }}
+              {% else %}<span style="color:#d1d5db">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- By category -->
+  <div class="card" style="overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:12px;font-weight:600;color:#111827">Distribución por categoría</span>
+      <span style="font-size:10px;color:#9ca3af">{{ by_category|length }} tipos</span>
+    </div>
+    <div style="max-height:220px;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead style="position:sticky;top:0;background:#fafafa;border-bottom:1px solid #f3f4f6">
+          <tr>
+            <th style="padding:6px 14px;text-align:left;color:#6b7280;font-weight:600">Categoría</th>
+            <th style="padding:6px 8px;text-align:right;color:#6b7280;font-weight:600">Sitios</th>
+            <th style="padding:6px 8px;text-align:right;color:#6b7280;font-weight:600">Activos</th>
+            <th style="padding:6px 14px;text-align:right;color:#6b7280;font-weight:600">Visitas/mes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set max_cat = (by_category | map(attribute='total') | max) or 1 %}
+          {% for cat in by_category %}
+          <tr style="border-top:1px solid #f3f4f6" onclick="filterByCategory('{{ cat.name }}')">
+            <td style="padding:6px 14px">
+              <span class="badge badge-blue" style="font-size:10px">{{ cat.name }}</span>
+            </td>
+            <td style="padding:6px 8px;text-align:right">
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">
+                <div style="width:40px;height:3px;background:#eff6ff;border-radius:2px;position:relative">
+                  <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#2563eb;width:{{ (cat.total / max_cat * 100)|round|int }}%"></div>
+                </div>
+                <span style="font-weight:500;color:#111827">{{ cat.total }}</span>
+              </div>
+            </td>
+            <td style="padding:6px 8px;text-align:right;color:#16a34a;font-weight:500">{{ cat.active }}</td>
+            <td style="padding:6px 14px;text-align:right;color:#7c3aed;font-weight:500">
+              {% set v = cat.visits %}
+              {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000)|replace(".",",") }}M
+              {% elif v >= 1000 %}{{ "%.0f"|format(v/1000) }}K
+              {% elif v > 0 %}{{ v | fmtnum }}
+              {% else %}<span style="color:#d1d5db">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── WORLD MAP ── -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<div class="card" style="padding:16px 18px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div>
+      <span style="font-size:12px;font-weight:600;color:#111827">Cobertura por país</span>
+      <span style="font-size:10px;color:#9ca3af;margin-left:8px">{{ by_country|length }} países · haz clic para filtrar la tabla</span>
+    </div>
+    <!-- Export buttons -->
+    <div style="display:flex;gap:6px">
+      <button onclick="exportMapSVG()" title="Exportar SVG (Illustrator)" style="display:flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;color:#374151">
+        <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        SVG
+      </button>
+      <button onclick="exportMapPNG()" title="Exportar PNG" style="display:flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;color:#374151">
+        <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        PNG
+      </button>
+      <button onclick="exportMapPDF()" title="Exportar PDF" style="display:flex;align-items:center;gap:4px;font-size:11px;padding:4px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;color:#374151">
+        <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        PDF
+      </button>
+    </div>
+  </div>
+
+  <!-- Annotation bar -->
+  <div id="mapAnnotationBar" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border-radius:7px;border:1px solid #e5e7eb">
+    <svg style="width:13px;height:13px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    <input id="mapTitle" type="text" placeholder="Título del mapa (opcional)" value="Cobertura geográfica · Sports Intel"
+      style="flex:1;border:none;background:transparent;outline:none;font-size:11px;color:#374151">
+    <span style="color:#e5e7eb">|</span>
+    <input id="mapNotes" type="text" placeholder="Notas / comentarios para el export..."
+      style="flex:2;border:none;background:transparent;outline:none;font-size:11px;color:#374151">
+  </div>
+
+  <div id="sitesMapWrap" style="background:#fff;border-radius:8px;overflow:hidden">
+    <div id="sitesMap" style="width:100%;height:360px;background:#f8fafc"></div>
+  </div>
+</div>
+
+<script>
+(function initSitesMap(){
+  const data = {{ by_country | tojson }};
+  const values = {};
+  const lookup = {};
+  data.forEach(function(c) {
+    if (c.code !== 'WW') {
+      values[c.code] = c.total;
+      lookup[c.code] = c;
+    }
+  });
+
+  if (typeof jsVectorMap === 'undefined') {
+    document.getElementById('sitesMap').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:12px">Mapa no disponible (sin conexión a CDN)</div>';
+    return;
+  }
+
+  new jsVectorMap({
+    selector: '#sitesMap',
+    map: 'world',
+    backgroundColor: '#f8fafc',
+    zoomButtons: true,
+    regionStyle: {
+      initial:  { fill: '#f3f4f6', stroke: '#e5e7eb', strokeWidth: 0.5 },
+      hover:    { fill: '#5eead4', cursor: 'pointer' },
+      selected: { fill: '#0d9488' },
+    },
+    series: {
+      regions: [{
+        attribute: 'fill',
+        scale: ['#cdf6ed', '#0d9488'],
+        normalizeFunction: 'polynomial',
+        values: values,
+      }]
+    },
+    onRegionTooltipShow(event, tooltip, code) {
+      const d = lookup[code];
+      if (!d) return;
+      tooltip.text(`${d.flag} ${d.name}: <b>${d.total}</b> sitios (${d.active} activos)`, true);
+    },
+    onRegionClick(event, code) {
+      const d = lookup[code];
+      if (d && d.total > 0) filterByCountry(d.name);
+    }
+  });
+})();
+
+// ── Map export helpers ────────────────────────────────────────────────────────
+function _mapTitle()  { return document.getElementById('mapTitle').value  || 'Cobertura geográfica'; }
+function _mapNotes()  { return document.getElementById('mapNotes').value  || ''; }
+function _today()     { return new Date().toISOString().slice(0,10); }
+
+function exportMapSVG() {
+  const svgEl = document.querySelector('#sitesMap svg');
+  if (!svgEl) return alert('Mapa no disponible');
+  const title = _mapTitle(), notes = _mapNotes();
+  // Clone and inject title + notes as SVG <text> elements
+  const clone = svgEl.cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  // White background rect
+  const bg = document.createElementNS('http://www.w3.org/2000/svg','rect');
+  bg.setAttribute('width','100%'); bg.setAttribute('height','100%'); bg.setAttribute('fill','#ffffff');
+  clone.insertBefore(bg, clone.firstChild);
+  // Title text
+  const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+  t.setAttribute('x','16'); t.setAttribute('y','22');
+  t.setAttribute('font-family','Arial,sans-serif'); t.setAttribute('font-size','14');
+  t.setAttribute('font-weight','bold'); t.setAttribute('fill','#0f172a');
+  t.textContent = title;
+  clone.appendChild(t);
+  if (notes) {
+    const n = document.createElementNS('http://www.w3.org/2000/svg','text');
+    n.setAttribute('x','16'); n.setAttribute('y','38');
+    n.setAttribute('font-family','Arial,sans-serif'); n.setAttribute('font-size','10'); n.setAttribute('fill','#6b7280');
+    n.textContent = notes;
+    clone.appendChild(n);
+  }
+  const date = document.createElementNS('http://www.w3.org/2000/svg','text');
+  const h = svgEl.getBoundingClientRect().height;
+  date.setAttribute('x','16'); date.setAttribute('y', (h - 8).toString());
+  date.setAttribute('font-family','Arial,sans-serif'); date.setAttribute('font-size','9'); date.setAttribute('fill','#9ca3af');
+  date.textContent = 'Sports Intel · ' + _today();
+  clone.appendChild(date);
+
+  const blob = new Blob([clone.outerHTML], {type:'image/svg+xml;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'cobertura_geografica_' + _today() + '.svg';
+  a.click();
+}
+
+function _captureMap(callback) {
+  const wrap = document.getElementById('sitesMapWrap');
+  html2canvas(wrap, { backgroundColor:'#ffffff', scale:2, useCORS:true, logging:false })
+    .then(canvas => callback(canvas));
+}
+
+function exportMapPNG() {
+  if (typeof html2canvas === 'undefined') { alert('html2canvas no disponible'); return; }
+  _captureMap(function(canvas) {
+    // Add title + notes watermark on canvas
+    const ctx = canvas.getContext('2d');
+    const title = _mapTitle(), notes = _mapNotes(), s = canvas.width;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = `bold ${Math.round(s*0.018)}px Arial`;
+    ctx.fillText(title, 20, 28);
+    if (notes) {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = `${Math.round(s*0.012)}px Arial`;
+      ctx.fillText(notes, 20, 46);
+    }
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = `${Math.round(s*0.01)}px Arial`;
+    ctx.fillText('Sports Intel · ' + _today(), 20, canvas.height - 12);
+
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = 'cobertura_geografica_' + _today() + '.png';
+    a.click();
+  });
+}
+
+function exportMapPDF() {
+  if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+    alert('Librerías de exportación no disponibles'); return;
+  }
+  _captureMap(function(canvas) {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+    const W = pdf.internal.pageSize.getWidth();
+    const H = pdf.internal.pageSize.getHeight();
+
+    // Header band
+    pdf.setFillColor(15, 23, 42);
+    pdf.rect(0, 0, W, 16, 'F');
+    pdf.setTextColor(255,255,255);
+    pdf.setFont('helvetica','bold'); pdf.setFontSize(11);
+    pdf.text(_mapTitle(), 10, 10.5);
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(8);
+    pdf.text('Sports Intel · ' + _today(), W - 10, 10.5, {align:'right'});
+
+    // Notes
+    const notes = _mapNotes();
+    let yMap = 20;
+    if (notes) {
+      pdf.setTextColor(107,114,128); pdf.setFontSize(8);
+      pdf.text(notes, 10, 19); yMap = 23;
+    }
+
+    // Map image
+    const imgData = canvas.toDataURL('image/png');
+    const mapH = H - yMap - 8;
+    pdf.addImage(imgData, 'PNG', 8, yMap, W - 16, mapH);
+
+    // Footer
+    pdf.setDrawColor(229,231,235); pdf.line(0, H - 7, W, H - 7);
+    pdf.setTextColor(156,163,175); pdf.setFontSize(7);
+    pdf.text('Generado por Sports Scraper Hub', W/2, H - 3, {align:'center'});
+
+    pdf.save('cobertura_geografica_' + _today() + '.pdf');
+  });
+}
+</script>
+
+<!-- ── SITES TABLE ── -->
+<style>
+  .sites-table th, .sites-table td { padding:7px 10px; font-size:12px; }
+  .sites-table .acciones { display:flex; align-items:center; justify-content:center; gap:2px; }
+  .sites-table .act-btn  { font-size:11px; padding:3px 6px; border-radius:5px; border:none; background:none; cursor:pointer; }
+  .sites-table .act-btn:hover { background:#f3f4f6; }
+  .sort-th { cursor:pointer; user-select:none; white-space:nowrap; }
+  .sort-th:hover { color:#111827; }
+  .sort-th .sort-icon { display:inline-block; margin-left:3px; opacity:.3; font-size:9px; }
+  .sort-th.asc .sort-icon::after  { content:'▲'; opacity:1; }
+  .sort-th.desc .sort-icon::after { content:'▼'; opacity:1; }
+  .sort-th:not(.asc):not(.desc) .sort-icon::after { content:'⇅'; }
+  #sites-empty { display:none; padding:40px; text-align:center; color:#9ca3af; font-size:13px; }
+</style>
+
+<!-- Filters bar -->
+<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+  <input id="f-search" placeholder="Buscar por nombre, URL, categoría…"
+         oninput="applyFilters()"
+         style="flex:1;min-width:200px;border:1px solid #e5e7eb;border-radius:8px;padding:6px 12px;font-size:12px">
+  <select id="f-country" onchange="applyFilters()"
+          style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px;color:#374151">
+    <option value="">Todos los países</option>
+    {% for c in by_country %}<option value="{{ c.name }}">{{ c.flag }} {{ c.name }} ({{ c.total }})</option>{% endfor %}
+  </select>
+  <select id="f-category" onchange="applyFilters()"
+          style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px;color:#374151">
+    <option value="">Todas las categorías</option>
+    {% for cat in by_category %}<option value="{{ cat.name }}">{{ cat.name }} ({{ cat.total }})</option>{% endfor %}
+  </select>
+  <select id="f-status" onchange="applyFilters()"
+          style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px;color:#374151">
+    <option value="">Todos los estados</option>
+    <option value="active">Activos</option>
+    <option value="paused">Pausados</option>
+  </select>
+  <select id="f-result" onchange="applyFilters()"
+          style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:12px;color:#374151">
+    <option value="">Todos los resultados</option>
+    <option value="success">✓ OK</option>
+    <option value="error">✗ Error</option>
+    <option value="empty">⚠ Sin artículos</option>
+    <option value="notraffic">Sin tráfico</option>
+  </select>
+  <button onclick="clearFilters()" class="btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">× Limpiar</button>
+  <span id="f-count" style="font-size:11px;color:#9ca3af;margin-left:auto"></span>
+</div>
+
+<div class="card" style="overflow-x:auto">
+  <table class="w-full sites-table" id="sites-table" style="min-width:1100px">
+    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
       <tr>
-        <th class="th">Sitio</th>
-        <th class="th">URL</th>
-        <th class="th">Patrón artículo</th>
-        <th class="th text-center">Hoy</th>
-        <th class="th text-center">Total</th>
-        <th class="th">Último scrape</th>
-        <th class="th text-center">Estado</th>
-        <th class="th text-center">Acciones</th>
+        <th class="sort-th" data-col="name" style="text-align:left">Sitio <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="country" style="text-align:left">País <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="category" style="text-align:left">Categoría <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="today" style="text-align:center;width:70px">Hoy <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="total" style="text-align:center;width:80px">Total <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="scraped" style="text-align:left;width:130px">Último scrape <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="result" style="text-align:center;width:110px">Resultado <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="visits" style="text-align:center;width:100px">Tráfico/mes <span class="sort-icon"></span></th>
+        <th style="text-align:center;width:80px">Estado</th>
+        <th style="text-align:center;width:100px">Acciones</th>
       </tr>
     </thead>
-    <tbody class="divide-y divide-gray-100">
+    <tbody id="sites-tbody">
       {% for s in sites %}
-      <tr class="hover:bg-gray-50 group">
-        <td class="td font-medium text-gray-900">{{ s.name }}</td>
-        <td class="td">
-          <a href="{{ s.url }}" target="_blank" class="text-teal-500 hover:underline text-xs truncate max-w-[200px] block">{{ s.url }}</a>
+      {% set c = country_by_code.get(s.country or 'WW', (s.country or '?', '🌐')) %}
+      {% set v = s.latest_visits or s.monthly_visits_manual or 0 %}
+      <tr class="site-row hover:bg-gray-50"
+          data-name="{{ s.name|lower }}"
+          data-url="{{ (s.url or '')|lower }}"
+          data-country="{{ c[0] }}"
+          data-category="{{ (s.category or '(sin categoría)')|lower }}"
+          data-today="{{ s.today_count }}"
+          data-total="{{ s.total_count }}"
+          data-scraped="{{ s.last_scraped or '' }}"
+          data-result="{{ s.last_scrape_status or '' }}"
+          data-visits="{{ v }}"
+          data-active="{{ '1' if s.active else '0' }}">
+        <td style="max-width:200px">
+          <div style="display:flex;align-items:center;gap:5px">
+            <span style="font-weight:500;color:#111827;font-size:12px">{{ s.name }}</span>
+            {% if s.cdp_url %}<span title="CDP: {{ s.cdp_url }}" style="background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;border:1px solid #fde68a">CDP</span>{% endif %}
+          </div>
+          <a href="{{ s.url }}" target="_blank" style="font-size:10px;color:#14b8a6;text-decoration:none;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">{{ s.url }}</a>
         </td>
-        <td class="td text-xs text-gray-400 font-mono">
-          {% if s.article_url_pattern %}{{ s.article_url_pattern }}{% else %}<span class="text-gray-300">dominio</span>{% endif %}
+        <td style="font-size:11px;color:#374151;white-space:nowrap">
+          <span style="font-size:13px">{{ c[1] }}</span> {{ c[0] }}
         </td>
-        <td class="td text-center">
-          <span class="badge {% if s.today_count > 0 %}bg-teal-50 text-teal-700{% else %}bg-gray-100 text-gray-400{% endif %}">
-            {{ s.today_count }}
-          </span>
+        <td>
+          {% if s.category %}<span class="badge badge-blue" style="font-size:10px">{{ s.category }}</span>
+          {% else %}<span style="color:#d1d5db;font-size:11px">—</span>{% endif %}
         </td>
-        <td class="td text-center text-gray-500">{{ s.total_count }}</td>
-        <td class="td text-xs text-gray-400">
+        <td style="text-align:center">
+          <span class="badge {% if s.today_count > 0 %}badge-teal{% else %}badge-gray{% endif %}">{{ s.today_count }}</span>
+        </td>
+        <td style="text-align:center;color:#374151;font-weight:500">{{ s.total_count }}</td>
+        <td style="font-size:11px;color:#9ca3af">
           {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}Nunca{% endif %}
         </td>
-        <td class="td text-center">
+        <td style="text-align:center">
+          {% if not s.last_scraped %}<span class="badge badge-gray">—</span>
+          {% elif s.last_scrape_status == 'success' %}
+            <span class="badge badge-green" title="{{ s.last_scrape_count }} nuevos">✓ {{ s.last_scrape_count }}</span>
+          {% elif s.last_scrape_status == 'empty' %}
+            <span class="badge badge-amber" title="{{ s.last_scrape_error }}">⚠ vacío</span>
+          {% elif s.last_scrape_status == 'error' %}
+            <span class="badge badge-red" title="{{ s.last_scrape_error }}" style="cursor:help">✗ error</span>
+          {% else %}
+            <span class="badge badge-gray">{{ s.last_scrape_status or '—' }}</span>
+          {% endif %}
+        </td>
+        <td class="traffic-cell" style="text-align:center;font-size:11px;cursor:pointer"
+            data-id="{{ s.id }}" data-name="{{ s.name }}" title="Ver evolución de tráfico">
+          {% if v %}
+            <span style="font-weight:600;color:#0d9488">
+              {% if v >= 1000000 %}{{ "%.1f"|format(v/1000000)|replace(".",",") }}M
+              {% elif v >= 1000 %}{{ "%.1f"|format(v/1000)|replace(".",",") }}K
+              {% else %}{{ v | fmtnum }}{% endif %}
+            </span>
+            <div style="font-size:9px;color:#9ca3af;margin-top:1px">
+              {% if s.monthly_visits_manual and not s.latest_visits %}manual{% else %}{{ s.latest_traffic_source or 'similarweb' }}{% endif %}
+            </div>
+          {% else %}<span style="color:#d1d5db">—</span>{% endif %}
+        </td>
+        <td style="text-align:center">
           <form method="post" action="/sites/{{ s.id }}/toggle">
             <button type="submit" class="badge {% if s.active %}bg-green-50 text-green-700 hover:bg-green-100{% else %}bg-gray-100 text-gray-500 hover:bg-gray-200{% endif %}">
-              {{ '● Activo' if s.active else '○ Paused' }}
+              {{ '● Activo' if s.active else '○ Pausado' }}
             </button>
           </form>
         </td>
-        <td class="td">
-          <div class="flex items-center justify-center gap-2">
-            <form method="post" action="/sites/{{ s.id }}/scrape" x-data="{l:false}" @submit="l=true">
-              <button type="submit" class="text-xs text-teal-600 hover:text-teal-800 font-medium px-2 py-1 rounded hover:bg-teal-50" :class="l&&'opacity-50'">
-                <span x-text="l?'...':'Scrapar'"></span>
+        <td>
+          <div class="acciones">
+            <form method="post" action="/sites/{{ s.id }}/scrape" x-data="{l:false}" @submit="l=true" style="display:inline">
+              <button type="submit" class="act-btn" :class="l&&'opacity-50'" style="color:#0d9488" title="Scrapar ahora">
+                <svg style="width:14px;height:14px;display:inline;vertical-align:middle" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
               </button>
             </form>
-            <button type="button"
-                    onclick="editSite({{ s.id }}, {{ s.name|tojson }}, {{ s.url|tojson }}, {{ (s.css_selector or '')|tojson }}, {{ (s.article_url_pattern or '')|tojson }}, {{ s.use_stealth }})"
-                    class="text-xs text-gray-600 hover:text-gray-800 font-medium px-2 py-1 rounded hover:bg-gray-100">
-              Editar
+            <button type="button" class="act-btn edit-site-btn" style="color:#6b7280" title="Editar"
+                    data-id="{{ s.id }}" data-name="{{ s.name }}" data-url="{{ s.url }}"
+                    data-css="{{ s.css_selector or '' }}" data-pattern="{{ s.article_url_pattern or '' }}"
+                    data-stealth="{{ s.use_stealth }}" data-category="{{ s.category or '' }}"
+                    data-country="{{ s.country or 'WW' }}"
+                    data-cookies="{{ (s.cookies_json or '')|replace('"', '&quot;') }}"
+                    data-cdp="{{ s.cdp_url or '' }}">
+              <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
-            <form method="post" action="/sites/{{ s.id }}/delete"
+            <form method="post" action="/sites/{{ s.id }}/delete" style="display:inline"
                   onsubmit="return confirm('¿Eliminar {{ s.name }} y todos sus artículos?')">
-              <button type="submit" class="text-xs text-red-500 hover:text-red-700 font-medium px-2 py-1 rounded hover:bg-red-50">
-                Eliminar
+              <button type="submit" class="act-btn" style="color:#dc2626" title="Eliminar">
+                <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
               </button>
             </form>
           </div>
         </td>
       </tr>
       {% else %}
-      <tr>
-        <td colspan="8" class="td text-center py-16 text-gray-400">
-          <div class="flex flex-col items-center gap-3">
-            <svg class="w-10 h-10 text-gray-200" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10"/></svg>
-            <p>No hay sitios registrados</p>
-            <button @click="$dispatch('open-modal')" class="btn-primary" x-data>Añadir primer sitio</button>
-          </div>
-        </td>
-      </tr>
+      <tr><td colspan="10" style="padding:48px;text-align:center;color:#9ca3af">
+        No hay sitios. <button @click="$dispatch('open-modal')" class="btn-primary btn-sm" x-data>Añadir primer sitio</button>
+      </td></tr>
       {% endfor %}
     </tbody>
   </table>
+  <div id="sites-empty">Sin resultados para los filtros actuales.</div>
 </div>
+
+<!-- Traffic Modal -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<div id="traffic_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:24px">
+  <div style="background:white;border-radius:12px;max-width:780px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+    <div style="padding:16px 24px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div id="traffic_modal_title" style="font-size:14px;font-weight:600;color:#111827"></div>
+        <div id="traffic_modal_sub" style="font-size:11px;color:#9ca3af;margin-top:2px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button id="traffic_refresh_btn" onclick="refreshTrafficNow()" class="btn-ghost" style="font-size:11px;padding:5px 10px">
+          <svg style="width:12px;height:12px;display:inline;vertical-align:middle" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Actualizar ahora
+        </button>
+        <button onclick="document.getElementById('traffic_modal').style.display='none'"
+                style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1">×</button>
+      </div>
+    </div>
+    <div style="padding:18px 24px;overflow-y:auto;flex:1">
+      <!-- Latest metrics -->
+      <div id="traffic_metrics" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px"></div>
+      <!-- Chart -->
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Evolución de visitas mensuales</div>
+        <div style="height:200px"><canvas id="trafficChart"></canvas></div>
+      </div>
+      <!-- Manual override -->
+      <div style="background:#fafafa;border:1px solid #f3f4f6;border-radius:8px;padding:12px">
+        <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Override manual</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:8px">Si Similarweb/Hypestat no tienen datos para este medio, introduce aquí el valor de visitas/mes que quieras usar.</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="manual_visits" placeholder="0" style="flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;font-size:12px">
+          <button onclick="saveManualVisits()" class="btn-primary" style="font-size:11px;padding:6px 14px">Guardar</button>
+        </div>
+      </div>
+      <div id="traffic_history_table" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+<script>
+let _trafficSiteId = null;
+let _trafficChart  = null;
+
+async function openTrafficModal(siteId, siteName) {
+  _trafficSiteId = siteId;
+  document.getElementById('traffic_modal_title').textContent = siteName;
+  document.getElementById('traffic_modal_sub').textContent = 'Cargando…';
+  document.getElementById('traffic_metrics').innerHTML = '';
+  document.getElementById('traffic_history_table').innerHTML = '';
+  document.getElementById('manual_visits').value = '';
+  if (_trafficChart) { _trafficChart.destroy(); _trafficChart = null; }
+  document.getElementById('traffic_modal').style.display = 'flex';
+  await loadTraffic();
+}
+
+async function loadTraffic() {
+  const r = await fetch('/sites/' + _trafficSiteId + '/traffic');
+  const d = await r.json();
+  if (!d.ok) {
+    document.getElementById('traffic_modal_sub').textContent = 'Error cargando datos';
+    return;
+  }
+  document.getElementById('traffic_modal_sub').textContent =
+    d.last_check ? `Última comprobación: ${d.last_check.slice(0,16).replace('T',' ')} · ${d.history.length} snapshots`
+                 : 'Aún sin datos. Pulsa "Actualizar ahora".';
+  document.getElementById('manual_visits').value = d.manual_visits || '';
+
+  const latest = d.latest;
+  const metrics = document.getElementById('traffic_metrics');
+  metrics.innerHTML = `
+    <div class="stat-card" style="padding:12px">
+      <div class="stat-label" style="font-size:9px">Visitas / mes</div>
+      <div class="stat-value" style="font-size:20px;margin:2px 0 0">
+        ${latest && latest.monthly_visits ? formatBig(latest.monthly_visits) : (d.manual_visits ? formatBig(d.manual_visits) + ' <span style=font-size:10px;color:#9ca3af>manual</span>' : '<span style=color:#d1d5db>—</span>')}
+      </div>
+    </div>
+    <div class="stat-card" style="padding:12px">
+      <div class="stat-label" style="font-size:9px">Bounce rate</div>
+      <div class="stat-value" style="font-size:20px;margin:2px 0 0">
+        ${latest && latest.bounce_rate ? (latest.bounce_rate*100).toFixed(1).replace('.', ',') + '%' : '<span style=color:#d1d5db>—</span>'}
+      </div>
+    </div>
+    <div class="stat-card" style="padding:12px">
+      <div class="stat-label" style="font-size:9px">Páginas / visita</div>
+      <div class="stat-value" style="font-size:20px;margin:2px 0 0">
+        ${latest && latest.pages_per_visit ? latest.pages_per_visit.toFixed(2).replace('.', ',') : '<span style=color:#d1d5db>—</span>'}
+      </div>
+    </div>
+    <div class="stat-card" style="padding:12px">
+      <div class="stat-label" style="font-size:9px">Rank país</div>
+      <div class="stat-value" style="font-size:20px;margin:2px 0 0">
+        ${latest && latest.country_rank ? '#' + latest.country_rank.toLocaleString('es-ES') : '<span style=color:#d1d5db>—</span>'}
+      </div>
+    </div>
+  `;
+
+  // Chart
+  const ctx = document.getElementById('trafficChart').getContext('2d');
+  _trafficChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: d.history.map(h => h.measured_at.slice(0,10)),
+      datasets: [{
+        label: 'Visitas/mes',
+        data: d.history.map(h => h.monthly_visits || 0),
+        borderColor: '#0d9488',
+        backgroundColor: 'rgba(20,184,166,.12)',
+        fill: true, tension: 0.3, pointRadius: 3, pointHoverRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { font:{size:10}, color:'#9ca3af', callback: v => formatBig(v) }, grid: { color:'#f3f4f6' } },
+        x: { ticks: { font:{size:10}, color:'#9ca3af' }, grid: { display:false } }
+      }
+    }
+  });
+
+  // History table
+  if (d.history.length) {
+    let html = '<div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Historial</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px">';
+    html += '<thead style="background:#fafafa"><tr><th style="text-align:left;padding:6px 8px;color:#6b7280">Fecha</th><th style="text-align:right;padding:6px 8px;color:#6b7280">Visitas</th><th style="text-align:right;padding:6px 8px;color:#6b7280">Rank país</th><th style="padding:6px 8px;color:#6b7280">Fuente</th></tr></thead><tbody>';
+    d.history.slice().reverse().forEach(h => {
+      html += `<tr style="border-top:1px solid #f3f4f6">
+        <td style="padding:6px 8px;color:#9ca3af">${h.measured_at.slice(0,16).replace('T',' ')}</td>
+        <td style="padding:6px 8px;text-align:right;color:#111827">${h.monthly_visits ? formatBig(h.monthly_visits) : '—'}</td>
+        <td style="padding:6px 8px;text-align:right;color:#374151">${h.country_rank ? '#'+h.country_rank.toLocaleString('es-ES') : '—'}</td>
+        <td style="padding:6px 8px;color:#6b7280">${h.source || '—'}${h.error ? ' ⚠ '+h.error.slice(0,40) : ''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('traffic_history_table').innerHTML = html;
+  }
+}
+
+async function refreshTrafficNow() {
+  const btn = document.getElementById('traffic_refresh_btn');
+  btn.textContent = 'Actualizando…';
+  btn.disabled = true;
+  await fetch('/sites/' + _trafficSiteId + '/traffic/refresh', { method: 'POST' });
+  await loadTraffic();
+  btn.textContent = 'Actualizar ahora';
+  btn.disabled = false;
+}
+
+async function saveManualVisits() {
+  const v = parseInt(document.getElementById('manual_visits').value) || 0;
+  const fd = new FormData();
+  fd.append('monthly_visits', v);
+  await fetch('/sites/' + _trafficSiteId + '/traffic/manual', { method: 'POST', body: fd });
+  alert('Override guardado');
+}
+
+function formatBig(n) {
+  if (!n) return '0';
+  if (n >= 1e9) return (n/1e9).toFixed(1).replace('.', ',') + 'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1).replace('.', ',') + 'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1).replace('.', ',') + 'K';
+  return n.toLocaleString('es-ES');
+}
+
+document.getElementById('traffic_modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+// Wire up traffic cells via data-attributes
+document.querySelectorAll('.traffic-cell').forEach(td => {
+  td.addEventListener('click', () => {
+    openTrafficModal(parseInt(td.dataset.id), td.dataset.name);
+  });
+});
+</script>
 
 <!-- Import Modal -->
 <div id="import_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:24px">
@@ -168,12 +802,15 @@
         <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">Fichero (txt o csv)</label>
         <input type="file" id="import_file" accept=".txt,.csv,.tsv"
                style="font-size:12px;width:100%;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc">
-        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Formato: un nombre por línea. Si tienes la URL: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">Marca, https://www.marca.com/</code></p>
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px;line-height:1.5">
+          Una línea por medio. Columnas: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">Nombre, URL, Categoría, País</code> (URL/categoría/país opcionales).<br>
+          Ej: <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">Marca, https://www.marca.com, Sports News, ES</code> · País acepta código ISO (<code>ES</code>) o nombre (<code>España</code>). Sin URL → la busca Gemini.
+        </p>
       </div>
       <div style="margin-bottom:16px">
         <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:6px">…o pegar directamente</label>
         <textarea id="import_text" rows="8"
-                  placeholder="Marca&#10;Mundo Deportivo&#10;Sport&#10;AS&#10;Relevo&#10;..."
+                  placeholder="Marca, https://www.marca.com, Sports News, ES&#10;Mundo Deportivo, https://www.mundodeportivo.com, Sports News, ES&#10;Sport&#10;..."
                   style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:10px;font-size:12px;font-family:monospace;resize:vertical"></textarea>
       </div>
       <div id="import_status" style="font-size:12px;margin-bottom:12px"></div>
@@ -187,28 +824,35 @@
     </div>
 
     <!-- Stage 2: review & confirm -->
-    <div id="import_stage_review" style="display:none;flex:1;display:flex;flex-direction:column;overflow:hidden">
+    <div id="import_stage_review" style="display:none;flex:1;flex-direction:column;overflow:hidden;min-height:0">
       <div style="padding:12px 24px;background:#f8fafc;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280">
-        Revisa, edita las URLs incorrectas y desmarca las que no quieras importar.
+        Revisa, edita los campos y desmarca las filas que no quieras importar.
       </div>
-      <div style="overflow-y:auto;flex:1">
-        <table style="width:100%;border-collapse:collapse">
+      <div style="overflow-y:auto;flex:1;min-height:0">
+        <table style="width:100%;border-collapse:collapse;min-width:880px">
           <thead style="position:sticky;top:0;background:#fafafa;border-bottom:1px solid #f3f4f6;z-index:1">
             <tr>
-              <th style="width:40px;padding:10px;text-align:center"></th>
-              <th style="padding:10px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;width:30%">Nombre</th>
-              <th style="padding:10px 12px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">URL</th>
-              <th style="width:120px;padding:10px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Estado</th>
+              <th style="width:34px;padding:10px;text-align:center"></th>
+              <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;width:20%">Nombre</th>
+              <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">URL</th>
+              <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;width:140px">Categoría</th>
+              <th style="padding:10px 8px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;width:140px">País</th>
+              <th style="width:100px;padding:10px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Estado</th>
             </tr>
           </thead>
           <tbody id="import_results_body"></tbody>
         </table>
       </div>
-      <div style="padding:14px 24px;border-top:1px solid #f3f4f6;display:flex;gap:8px;justify-content:flex-end">
+      <div style="padding:14px 24px;border-top:1px solid #f3f4f6;display:flex;gap:8px;justify-content:flex-end;flex-shrink:0">
         <button onclick="importReset()" class="btn-ghost">← Volver</button>
         <button id="import_confirm_btn" onclick="importConfirm()" class="btn-primary">Importar marcados</button>
       </div>
     </div>
+    <datalist id="cat-list-import">
+      <option value="Sports B2B"><option value="Sports News"><option value="General News">
+      <option value="Business"><option value="Technology"><option value="Entertainment">
+      <option value="Lifestyle"><option value="Local News">
+    </datalist>
   </div>
 </div>
 
@@ -231,6 +875,27 @@
         <input id="edit_url" name="url" type="url" required
                style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
       </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Categoría</label>
+          <input id="edit_category" name="category" list="cat-list-edit"
+                 style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+          <datalist id="cat-list-edit">
+            <option value="Sports B2B"><option value="Sports News"><option value="General News">
+            <option value="Business"><option value="Technology"><option value="Entertainment">
+            <option value="Lifestyle"><option value="Local News">
+          </datalist>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">País</label>
+          <select id="edit_country" name="country"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+            {% for code, name, flag in countries %}
+            <option value="{{ code }}">{{ flag }} {{ name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
       <div>
         <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Selector CSS <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
         <input id="edit_css" name="css_selector"
@@ -251,6 +916,32 @@
           <div style="font-size:11px;color:#9ca3af">Fuerza navegador anti-bot (Cloudflare, etc.)</div>
         </div>
       </label>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Cookies <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <textarea id="edit_cookies" name="cookies_json" rows="3"
+                  placeholder='{"session":"abc123","token":"xyz"} o nombre=valor; nombre2=valor2'
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:12px;font-family:monospace;resize:vertical"></textarea>
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Pega cookies como JSON <code>{"key":"val"}</code>, array de objetos con name/value, o string <code>key=val; key2=val2</code>. Se envían en cada petición al sitio.</p>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">
+          Chrome CDP URL
+          <span style="color:#9ca3af;font-weight:400">(opcional — máximo anti-bot)</span>
+        </label>
+        <input id="edit_cdp" name="cdp_url" placeholder="ws://localhost:9222"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:12px;font-family:monospace">
+        <div style="margin-top:6px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px">
+          <p style="font-size:11px;color:#92400e;font-weight:600;margin-bottom:3px">⚡ Cómo usar tu Chrome real</p>
+          <p style="font-size:11px;color:#78350f;line-height:1.5">
+            1. Cierra Chrome por completo<br>
+            2. Ábrelo con depuración remota:<br>
+            <code style="background:#fef3c7;padding:1px 5px;border-radius:3px;font-size:10px;display:block;margin-top:3px">/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 --no-first-run</code><br>
+            3. Copia <code style="background:#fef3c7;padding:1px 4px;border-radius:3px">ws://localhost:9222</code> aquí<br>
+            4. Inicia sesión manualmente en el sitio en ese Chrome<br>
+            5. El scraper usará exactamente tu sesión activa
+          </p>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;padding-top:8px">
         <button type="submit" class="btn-primary" style="flex:1;justify-content:center">Guardar cambios</button>
         <button type="button" onclick="document.getElementById('edit_modal').style.display='none'"
@@ -297,20 +988,33 @@ async function importPreview() {
     data.items.forEach((item, i) => {
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid #f3f4f6';
+      const esc = s => (s||'').replace(/"/g,'&quot;');
       tr.innerHTML = `
-        <td style="padding:8px 12px;text-align:center">
+        <td style="padding:8px 6px;text-align:center">
           <input type="checkbox" data-i="${i}" ${item.duplicate || !item.url ? '' : 'checked'} style="width:14px;height:14px">
         </td>
-        <td style="padding:8px 12px;font-size:13px">
-          <input data-name="${i}" value="${(item.name||'').replace(/"/g,'&quot;')}"
+        <td style="padding:8px 6px;font-size:13px">
+          <input data-name="${i}" value="${esc(item.name)}"
                  style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
         </td>
-        <td style="padding:8px 12px">
-          <input data-url="${i}" value="${(item.url||'').replace(/"/g,'&quot;')}"
+        <td style="padding:8px 6px">
+          <input data-url="${i}" value="${esc(item.url)}"
                  placeholder="https://..."
                  style="border:1px solid ${item.url ? '#e5e7eb' : '#fde68a'};border-radius:6px;padding:5px 8px;font-size:12px;width:100%;background:${item.url ? 'white' : '#fffbeb'}">
         </td>
-        <td style="padding:8px 12px;text-align:center">
+        <td style="padding:8px 6px">
+          <input data-category="${i}" list="cat-list-import" value="${esc(item.category)}"
+                 placeholder="Sports News..."
+                 style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+        </td>
+        <td style="padding:8px 6px">
+          <select data-country="${i}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+            ${COUNTRIES_OPTIONS.map(c =>
+              `<option value="${c.code}" ${c.code === (item.country || 'WW') ? 'selected' : ''}>${c.flag} ${c.name}</option>`
+            ).join('')}
+          </select>
+        </td>
+        <td style="padding:8px 6px;text-align:center">
           ${item.duplicate
             ? '<span class="badge badge-gray" style="font-size:10px">Ya existe</span>'
             : item.found
@@ -321,7 +1025,7 @@ async function importPreview() {
       tbody.appendChild(tr);
     });
     stage1.style.display = 'none';
-    stage2.style.display = 'block';
+    stage2.style.display = 'flex';
   } catch(e) {
     status.textContent = 'Error: ' + e.message;
     status.style.color = '#dc2626';
@@ -335,9 +1039,11 @@ async function importConfirm() {
     const cb = tr.querySelector('input[type=checkbox]');
     if (!cb || !cb.checked) return;
     const i = cb.dataset.i;
-    const name = tr.querySelector(`[data-name="${i}"]`).value.trim();
-    const url  = tr.querySelector(`[data-url="${i}"]`).value.trim();
-    if (name && url) items.push({ name, url });
+    const name     = tr.querySelector(`[data-name="${i}"]`).value.trim();
+    const url      = tr.querySelector(`[data-url="${i}"]`).value.trim();
+    const category = tr.querySelector(`[data-category="${i}"]`).value.trim();
+    const country  = tr.querySelector(`[data-country="${i}"]`).value.trim();
+    if (name && url) items.push({ name, url, category, country });
   });
   if (!items.length) { alert('Marca al menos un sitio'); return; }
   const btn = document.getElementById('import_confirm_btn');
@@ -366,20 +1072,127 @@ function importReset() {
   document.getElementById('import_text').value = '';
 }
 
-function editSite(id, name, url, css, pattern, stealth) {
+const COUNTRIES_OPTIONS = [
+  {% for code, name, flag in countries %}{ code: "{{ code }}", name: "{{ name|replace('"', '\\"') }}", flag: "{{ flag }}" }{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+
+function editSite(id, name, url, css, pattern, stealth, category, country, cookies, cdp) {
   document.getElementById('edit_form').action = '/sites/' + id + '/edit';
-  document.getElementById('edit_name').value    = name || '';
-  document.getElementById('edit_url').value     = url || '';
-  document.getElementById('edit_css').value     = css || '';
-  document.getElementById('edit_pattern').value = pattern || '';
+  document.getElementById('edit_name').value     = name || '';
+  document.getElementById('edit_url').value      = url || '';
+  document.getElementById('edit_css').value      = css || '';
+  document.getElementById('edit_pattern').value  = pattern || '';
   document.getElementById('edit_stealth').checked = !!stealth;
+  document.getElementById('edit_category').value = category || '';
+  document.getElementById('edit_country').value  = country || 'WW';
+  document.getElementById('edit_cookies').value  = cookies || '';
+  document.getElementById('edit_cdp').value      = cdp || '';
   document.getElementById('edit_modal').style.display = 'flex';
 }
+// Wire up edit buttons via data-attributes (avoids HTML attribute escape issues)
+document.querySelectorAll('.edit-site-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    editSite(
+      parseInt(btn.dataset.id),
+      btn.dataset.name,
+      btn.dataset.url,
+      btn.dataset.css,
+      btn.dataset.pattern,
+      parseInt(btn.dataset.stealth) || 0,
+      btn.dataset.category,
+      btn.dataset.country,
+      btn.dataset.cookies,
+      btn.dataset.cdp
+    );
+  });
+});
 document.getElementById('edit_modal').addEventListener('click', function(e) {
   if (e.target === this) this.style.display = 'none';
 });
 document.getElementById('import_modal').addEventListener('click', function(e) {
   if (e.target === this) this.style.display = 'none';
+});
+
+// ── Filter & Sort ────────────────────────────────────────
+function applyFilters() {
+  const search   = (document.getElementById('f-search').value   || '').toLowerCase();
+  const country  = (document.getElementById('f-country').value  || '').toLowerCase();
+  const category = (document.getElementById('f-category').value || '').toLowerCase();
+  const status   = (document.getElementById('f-status').value   || '').toLowerCase();
+  const result   = (document.getElementById('f-result').value   || '').toLowerCase();
+
+  let visible = 0;
+  document.querySelectorAll('.site-row').forEach(row => {
+    const name      = (row.dataset.name     || '').toLowerCase();
+    const url       = (row.dataset.url      || '').toLowerCase();
+    const rowCat    = (row.dataset.category || '').toLowerCase();
+    const rowCnt    = (row.dataset.country  || '').toLowerCase();
+    const rowActive = row.dataset.active;   // "1" or "0"
+    const rowRes    = (row.dataset.result   || '').toLowerCase();
+
+    const matchSearch   = !search   || name.includes(search) || url.includes(search) || rowCat.includes(search);
+    const matchCountry  = !country  || rowCnt === country;
+    const matchCategory = !category || rowCat === category;
+    const matchStatus   = !status   || (status === 'active' && rowActive === '1') || (status === 'paused' && rowActive === '0');
+    const matchResult   = !result   || rowRes === result;
+
+    const show = matchSearch && matchCountry && matchCategory && matchStatus && matchResult;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  const el = document.getElementById('f-count');
+  if (el) el.textContent = visible + ' sitio' + (visible !== 1 ? 's' : '');
+}
+
+function clearFilters() {
+  document.getElementById('f-search').value   = '';
+  document.getElementById('f-country').value  = '';
+  document.getElementById('f-category').value = '';
+  document.getElementById('f-status').value   = '';
+  document.getElementById('f-result').value   = '';
+  applyFilters();
+}
+
+function filterByCountry(name) {
+  document.getElementById('f-country').value = name;
+  applyFilters();
+  document.getElementById('sites-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function filterByCategory(name) {
+  document.getElementById('f-category').value = name;
+  applyFilters();
+  document.getElementById('sites-table')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Column sort ──────────────────────────────────────────
+let _sortCol = null, _sortDir = 1;
+
+document.querySelectorAll('.sort-th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (_sortCol === col) {
+      _sortDir *= -1;
+    } else {
+      _sortCol = col;
+      _sortDir = 1;
+    }
+    document.querySelectorAll('.sort-th').forEach(h => h.classList.remove('asc', 'desc'));
+    th.classList.add(_sortDir === 1 ? 'asc' : 'desc');
+
+    const tbody = document.getElementById('sites-tbody');
+    const rows  = Array.from(tbody.querySelectorAll('.site-row'));
+    rows.sort((a, b) => {
+      let av = (a.dataset[col] || '').toLowerCase();
+      let bv = (b.dataset[col] || '').toLowerCase();
+      const an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * _sortDir;
+      return av < bv ? -_sortDir : av > bv ? _sortDir : 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+  });
 });
 </script>
 

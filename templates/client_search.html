@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+{% block title %}{{ search.name }} · {{ client.name }} · Scraper Hub{% endblock %}
+{% block page_title %}{{ search.name }}{% endblock %}
+{% block page_sub %}
+  <a href="/clients" style="color:#9ca3af;text-decoration:none">Clientes</a> ›
+  <a href="/clients/{{ client.id }}" style="color:#9ca3af;text-decoration:none">{{ client.name }}</a> ›
+  <span style="color:#374151">{{ search.name }}</span>
+  · últimos {{ days }} días{% if search.notes %} · <span style="color:#6b7280">{{ search.notes }}</span>{% endif %}
+{% endblock %}
+
+{% block header_actions %}
+  <a href="/clients/{{ client.id }}" class="btn-ghost">← Volver</a>
+  <button onclick="document.getElementById('edit_search_modal').style.display='flex'" class="btn-ghost">
+    <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    Editar búsqueda
+  </button>
+  <button onclick="document.getElementById('new_brand_modal').style.display='flex'" class="btn-primary">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Añadir marca
+  </button>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── SECCIÓN 1: UNIVERSO DE LA BÚSQUEDA ── -->
+<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
+  <span style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.06em;text-transform:uppercase">Universo de la búsqueda</span>
+  <div style="height:1px;flex:1;background:#f3f4f6"></div>
+</div>
+
+{% if search.keywords %}
+<!-- Scope info banner -->
+<div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;background:#fffbeb;border-color:#fde68a;font-size:12px">
+  <svg style="width:14px;height:14px;color:#d97706;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+  </svg>
+  <div style="color:#92400e;flex:1">
+    Noticias que mencionan:
+    {% for k in search.keywords.split(',') %}<code style="background:#fde68a;color:#92400e;padding:1px 6px;border-radius:4px;margin-right:4px">{{ k.strip() }}</code>{% endfor %}
+    {% if client_universe.configured %}
+      dentro del universo del cliente
+      ({% for k in client.keywords.split(',')[:3] %}<code style="background:#fef9c3;color:#92400e;padding:1px 5px;border-radius:3px;margin-right:3px;font-size:10px">{{ k.strip() }}</code>{% endfor %}{% if client.keywords.split(',')|length > 3 %}<span style="color:#b45309;font-size:10px">+{{ client.keywords.split(',')|length - 3 }}</span>{% endif %})
+    {% endif %}
+  </div>
+</div>
+
+<!-- Búsqueda KPI cards -->
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px">
+  <div class="stat-card">
+    <div class="stat-label">Noticias búsqueda ({{ days }}d)</div>
+    <div class="stat-value" style="color:#d97706">{{ "{:,}".format(search_universe.total).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ search_universe.today }} hoy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">OTS búsqueda</div>
+    <div class="stat-value" style="color:#2563eb">
+      {% if search_universe.ots >= 1000000 %}{{ "%.1f"|format(search_universe.ots/1000000) }}M
+      {% elif search_universe.ots >= 1000 %}{{ "%.0f"|format(search_universe.ots/1000) }}K
+      {% else %}{{ search_universe.ots }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">impresiones potenciales</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">VPE búsqueda</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% if search_universe.vpe >= 1000000 %}{{ "%.1f"|format(search_universe.vpe/1000000) }}M€
+      {% elif search_universe.vpe >= 1000 %}{{ "%.1f"|format(search_universe.vpe/1000) }}K€
+      {% else %}{{ "%.0f"|format(search_universe.vpe) }}€{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">€ publicidad equivalente</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Universo cliente</div>
+    <div class="stat-value" style="color:#9ca3af">
+      {% if client_universe.configured %}{{ "{:,}".format(client_universe.total).replace(",", ".") }}{% else %}—{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">noticias 30d</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">% cobertura</div>
+    <div class="stat-value" style="color:#374151">
+      {% if client_universe.configured and client_universe.total > 0 %}
+        {{ "%.0f"|format(search_universe.total / client_universe.total * 100) }}%
+      {% else %}—{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">noticias búsqueda / universo</div>
+  </div>
+</div>
+
+{% else %}
+<!-- No keywords configured for this búsqueda -->
+<div class="card" style="padding:12px 16px;margin-bottom:20px;background:#fef2f2;border-color:#fecaca;font-size:12px;color:#991b1b;display:flex;align-items:center;justify-content:space-between">
+  <span>⚠ Esta búsqueda no tiene keywords — añade palabras clave para definir su universo y calcular sus métricas propias.</span>
+  <button onclick="document.getElementById('edit_search_modal').style.display='flex'"
+          style="background:none;border:1px solid #dc2626;border-radius:6px;padding:4px 10px;font-size:11px;color:#dc2626;cursor:pointer;font-weight:600">Configurar →</button>
+</div>
+{% endif %}
+
+<!-- ── SECCIÓN 2: MARCAS ── -->
+<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
+  <span style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.06em;text-transform:uppercase">Marcas en seguimiento</span>
+  <div style="height:1px;flex:1;background:#f3f4f6"></div>
+</div>
+
+<!-- Brand aggregate KPI cards -->
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:14px">
+  <div class="stat-card">
+    <div class="stat-label">Marcas</div>
+    <div class="stat-value">{{ brands|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">en esta búsqueda</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Menciones ({{ days }}d)</div>
+    <div class="stat-value" style="color:#0d9488">{{ "{:,}".format(agg.total).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ agg.today }} hoy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">OTS marcas</div>
+    <div class="stat-value" style="color:#2563eb">
+      {% if agg.ots >= 1000000 %}{{ "%.1f"|format(agg.ots/1000000) }}M
+      {% elif agg.ots >= 1000 %}{{ "%.0f"|format(agg.ots/1000) }}K
+      {% else %}{{ agg.ots }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">impresiones</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">VPE marcas</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% if agg.vpe >= 1000000 %}{{ "%.1f"|format(agg.vpe/1000000) }}M€
+      {% elif agg.vpe >= 1000 %}{{ "%.1f"|format(agg.vpe/1000) }}K€
+      {% else %}{{ "%.0f"|format(agg.vpe) }}€{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">€ pub. equivalente</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Países activos</div>
+    <div class="stat-value" style="color:#d97706">{{ agg.by_country|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ agg.by_category|length }} tipos de medio</div>
+  </div>
+</div>
+
+<!-- Brands table -->
+<div class="card" style="overflow:hidden;margin-bottom:14px">
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;min-width:900px">
+      <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+        <tr>
+          <th>Marca</th>
+          <th style="width:180px">Query</th>
+          <th style="text-align:center;width:70px">Hoy</th>
+          <th style="text-align:center;width:80px">Total {{ days }}d</th>
+          <th style="width:130px">Tendencia</th>
+          <th style="text-align:center;width:80px">OTS</th>
+          <th style="text-align:center;width:80px">VPE</th>
+          <th style="width:100px;text-align:center">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in brands %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td>
+            <a href="/clients/{{ client.id }}/searches/{{ search.id }}/brands/{{ b.id }}"
+               style="font-weight:600;font-size:13px;color:#111827;text-decoration:none">{{ b.name }}</a>
+            {% if b.notes %}<div style="font-size:11px;color:#9ca3af">{{ b.notes[:60] }}</div>{% endif %}
+          </td>
+          <td>
+            <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;font-size:11px;color:#374151">{{ b.query[:30] }}{% if b.query|length > 30 %}…{% endif %}</code>
+          </td>
+          <td style="text-align:center">
+            <span class="badge {% if b.kpis.today > 0 %}badge-teal{% else %}badge-gray{% endif %}">{{ b.kpis.today }}</span>
+          </td>
+          <td style="text-align:center;font-weight:600;font-size:14px">{{ b.kpis.total }}</td>
+          <td>
+            <svg viewBox="0 0 130 32" style="width:130px;height:32px;display:block" preserveAspectRatio="none">
+              {% set max_c = (b.kpis.series | map(attribute='count') | max) or 1 %}
+              {% set pts = [] %}
+              {% for p in b.kpis.series %}
+                {% set x = loop.index0 * (130 / (b.kpis.series|length - 1 if b.kpis.series|length > 1 else 1)) %}
+                {% set y = 28 - (p.count / max_c * 24) if max_c > 0 else 28 %}
+                {% set _ = pts.append("%.1f,%.1f"|format(x, y)) %}
+              {% endfor %}
+              <polyline points="{{ pts|join(' ') }}" fill="none" stroke="#0d9488" stroke-width="1.5"/>
+            </svg>
+          </td>
+          <td style="text-align:center;font-size:12px;color:#2563eb;font-weight:500">
+            {% if b.kpis.ots >= 1000000 %}{{ "%.1f"|format(b.kpis.ots/1000000) }}M
+            {% elif b.kpis.ots >= 1000 %}{{ "%.0f"|format(b.kpis.ots/1000) }}K
+            {% else %}{{ b.kpis.ots }}{% endif %}
+          </td>
+          <td style="text-align:center;font-size:12px;color:#7c3aed;font-weight:500">
+            {% if b.kpis.vpe >= 1000 %}{{ "%.1f"|format(b.kpis.vpe/1000) }}K€
+            {% else %}{{ "%.0f"|format(b.kpis.vpe) }}€{% endif %}
+          </td>
+          <td style="text-align:center">
+            <a href="/clients/{{ client.id }}/searches/{{ search.id }}/brands/{{ b.id }}" class="btn-ghost btn-sm" title="Ver detalle">→</a>
+            <button class="btn-ghost btn-sm edit-brand-btn"
+                    data-id="{{ b.id }}" data-name="{{ b.name }}"
+                    data-query="{{ b.query }}" data-notes="{{ b.notes }}">✎</button>
+            <form method="post" action="/clients/{{ client.id }}/searches/{{ search.id }}/brands/{{ b.id }}/delete" style="display:inline"
+                  onsubmit="return confirm('¿Borrar la marca «{{ b.name }}»?')">
+              <button type="submit" class="btn-danger btn-sm">×</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="padding:40px;text-align:center;color:#9ca3af">
+          <div style="font-size:13px;color:#6b7280;margin-bottom:6px">Sin marcas en esta búsqueda todavía</div>
+          <div style="font-size:11px">Pulsa <b>Añadir marca</b> arriba a la derecha para empezar a hacer seguimiento.</div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if brands and agg.by_country %}
+<!-- Brand distributions (country + category) -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="card" style="overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:12px;font-weight:600;color:#374151">Menciones por país · marcas</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa"><tr>
+        <th style="padding:7px 14px">País</th>
+        <th style="padding:7px;text-align:right">Menc.</th>
+        <th style="padding:7px;text-align:right">OTS</th>
+        <th style="padding:7px 14px;text-align:right">VPE</th>
+      </tr></thead>
+      <tbody>
+        {% set max_c = (agg.by_country | map(attribute='count') | max) or 1 %}
+        {% for c in agg.by_country %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:7px 14px"><span style="font-size:14px">{{ c.flag }}</span><span style="margin-left:6px">{{ c.name }}</span><span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ c.sites }})</span></td>
+          <td style="padding:7px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">
+              <div style="width:35px;height:3px;background:#f0fdfa;border-radius:2px;position:relative"><div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (c.count / max_c * 100)|round|int }}%"></div></div>
+              <span style="font-weight:500">{{ c.count }}</span>
+            </div>
+          </td>
+          <td style="padding:7px;text-align:right;color:#2563eb;font-weight:500">{% if c.ots >= 1000 %}{{ "%.0f"|format(c.ots/1000) }}K{% else %}{{ c.ots }}{% endif %}</td>
+          <td style="padding:7px 14px;text-align:right;color:#7c3aed;font-weight:500">{% if c.vpe >= 1000 %}{{ "%.1f"|format(c.vpe/1000) }}K€{% else %}{{ "%.0f"|format(c.vpe) }}€{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:12px;font-weight:600;color:#374151">Menciones por tipo de medio · marcas</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa"><tr>
+        <th style="padding:7px 14px">Categoría</th>
+        <th style="padding:7px;text-align:right">Menc.</th>
+        <th style="padding:7px;text-align:right">OTS</th>
+        <th style="padding:7px 14px;text-align:right">VPE</th>
+      </tr></thead>
+      <tbody>
+        {% set max_c2 = (agg.by_category | map(attribute='count') | max) or 1 %}
+        {% for cat in agg.by_category %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:7px 14px"><span class="badge badge-blue" style="font-size:10px">{{ cat.name }}</span><span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ cat.sites }})</span></td>
+          <td style="padding:7px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px">
+              <div style="width:35px;height:3px;background:#eff6ff;border-radius:2px;position:relative"><div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#2563eb;width:{{ (cat.count / max_c2 * 100)|round|int }}%"></div></div>
+              <span style="font-weight:500">{{ cat.count }}</span>
+            </div>
+          </td>
+          <td style="padding:7px;text-align:right;color:#2563eb;font-weight:500">{% if cat.ots >= 1000 %}{{ "%.0f"|format(cat.ots/1000) }}K{% else %}{{ cat.ots }}{% endif %}</td>
+          <td style="padding:7px 14px;text-align:right;color:#7c3aed;font-weight:500">{% if cat.vpe >= 1000 %}{{ "%.1f"|format(cat.vpe/1000) }}K€{% else %}{{ "%.0f"|format(cat.vpe) }}€{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── SECCIÓN 3: NOTICIAS DE LA BÚSQUEDA ── -->
+<div style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
+  <span style="font-size:11px;font-weight:700;color:#6b7280;letter-spacing:.06em;text-transform:uppercase">Noticias de la búsqueda</span>
+  <div style="height:1px;flex:1;background:#f3f4f6"></div>
+  {% if search_articles %}
+  <span style="font-size:11px;color:#9ca3af">{{ search_articles|length }} artículo{{ 's' if search_articles|length != 1 }}</span>
+  {% endif %}
+</div>
+
+{% if not search.keywords %}
+<div style="padding:32px;text-align:center;color:#9ca3af;font-size:12px">
+  Configura los <b>keywords de esta búsqueda</b> para ver las noticias que la componen.
+</div>
+{% else %}
+<div class="card" style="overflow:hidden;margin-bottom:18px">
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead style="background:#fafafa">
+      <tr>
+        <th style="padding:10px 14px">Titular</th>
+        <th style="padding:10px;width:150px">Medio</th>
+        <th style="padding:10px;width:80px">País</th>
+        <th style="padding:10px;width:110px">Categoría</th>
+        <th style="padding:10px;width:90px">Fecha</th>
+        <th style="padding:10px;width:70px;text-align:right">OTS</th>
+        <th style="padding:10px 14px;width:70px;text-align:right">VPE</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in search_articles %}
+      <tr style="border-top:1px solid #f3f4f6">
+        <td style="padding:10px 14px;max-width:420px">
+          <a href="{{ a.article_url or '#' }}" target="_blank"
+             style="color:#374151;text-decoration:none;line-height:1.4">{{ a.title }}</a>
+        </td>
+        <td style="padding:10px;color:#6b7280">{{ a.site_name }}</td>
+        <td style="padding:10px">
+          <span style="font-size:13px">{{ a.flag }}</span>
+          <span style="color:#9ca3af;font-size:10px;margin-left:2px">{{ a.country }}</span>
+        </td>
+        <td style="padding:10px">
+          <span class="badge badge-slate" style="font-size:10px">{{ a.category }}</span>
+        </td>
+        <td style="padding:10px;color:#9ca3af">{{ a.scrape_date }}</td>
+        <td style="padding:10px;text-align:right;color:#2563eb;font-weight:500">
+          {% if a.ots >= 1000 %}{{ "%.0f"|format(a.ots/1000) }}K{% else %}{{ a.ots }}{% endif %}
+        </td>
+        <td style="padding:10px 14px;text-align:right;color:#7c3aed;font-weight:500">
+          {% if a.vpe >= 1000 %}{{ "%.1f"|format(a.vpe/1000) }}K€{% else %}{{ "%.0f"|format(a.vpe) }}€{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="padding:40px;text-align:center;color:#9ca3af">
+        Sin noticias de «{% for k in search.keywords.split(',') %}{{ k.strip() }}{% if not loop.last %}, {% endif %}{% endfor %}» en los últimos {{ days }} días.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- New brand modal -->
+<div id="new_brand_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:520px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Añadir marca a «{{ search.name }}»</h2>
+      <button onclick="document.getElementById('new_brand_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form method="post" action="/clients/{{ client.id }}/searches/{{ search.id }}/brands" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre de la marca *</label>
+        <input name="name" required placeholder="Ej: Nike, Estrella Damm, Movistar..."
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Query de búsqueda *</label>
+        <input name="query" required placeholder="Ej: Nike"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Palabra/frase que se buscará dentro de las noticias de esta búsqueda.</p>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <textarea name="notes" rows="2" style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('new_brand_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Crear marca</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit brand modal -->
+<div id="edit_brand_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:520px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Editar marca</h2>
+      <button onclick="document.getElementById('edit_brand_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form id="edit_brand_form" method="post" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre *</label>
+        <input id="edit_brand_name" name="name" required
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Query de búsqueda *</label>
+        <input id="edit_brand_query" name="query" required
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas</label>
+        <textarea id="edit_brand_notes" name="notes" rows="2"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('edit_brand_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit search modal -->
+<div id="edit_search_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:540px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Editar búsqueda</h2>
+      <button onclick="document.getElementById('edit_search_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form method="post" action="/clients/{{ client.id }}/searches/{{ search.id }}/edit" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre *</label>
+        <input name="name" required value="{{ search.name }}"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">
+          Keywords de la búsqueda *
+          <span style="color:#9ca3af;font-weight:400">— separadas por comas</span>
+        </label>
+        <textarea name="keywords" rows="2" required
+                  placeholder="Ej: Supercopa, Supercopa de España, Copa del Rey..."
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical">{{ search.keywords or '' }}</textarea>
+        <p style="font-size:11px;color:#6b7280;margin-top:4px;line-height:1.5">
+          Define qué noticias forman el universo de esta búsqueda. Las marcas se buscarán <b>solo dentro</b> de estas noticias (y dentro del universo del cliente).
+        </p>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <textarea name="notes" rows="2"
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical">{{ search.notes or '' }}</textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('edit_search_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.edit-brand-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.getElementById('edit_brand_form').action =
+      `/clients/{{ client.id }}/searches/{{ search.id }}/brands/${btn.dataset.id}/edit`;
+    document.getElementById('edit_brand_name').value  = btn.dataset.name || '';
+    document.getElementById('edit_brand_query').value = btn.dataset.query || '';
+    document.getElementById('edit_brand_notes').value = btn.dataset.notes || '';
+    document.getElementById('edit_brand_modal').style.display = 'flex';
+  });
+});
+</script>
+
+{% endblock %}

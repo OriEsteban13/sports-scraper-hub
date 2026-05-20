@@ -1,87 +1,350 @@
 {% extends "base.html" %}
 {% block title %}Ajustes · Scraper Hub{% endblock %}
 {% block page_title %}Ajustes de scraping automático{% endblock %}
-{% block page_sub %}Configura cuándo se scrapea y enriquece cada medio · revisión cada 5 min{% endblock %}
+{% block page_sub %}Configura cuándo se scrapea y enriquece cada medio{% endblock %}
 
 {% block content %}
 
-<!-- AI status banner -->
-<div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px;
-            {% if ai_configured %}background:#f0fdf4;border-color:#bbf7d0{% else %}background:#fffbeb;border-color:#fde68a{% endif %}">
-  <svg style="width:18px;height:18px;color:{% if ai_configured %}#16a34a{% else %}#d97706{% endif %}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-    {% if ai_configured %}<polyline points="20 6 9 17 4 12"/>
-    {% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}
-  </svg>
-  <div style="flex:1">
-    <div style="font-size:13px;font-weight:600;color:{% if ai_configured %}#15803d{% else %}#b45309{% endif %}">
-      {% if ai_configured %}Extracción AI activa (Gemini){% else %}Extracción AI desactivada{% endif %}
+<!-- Scheduler status widget -->
+<div class="card" style="padding:0;margin-bottom:16px;overflow:hidden" id="sched-card">
+  <div style="padding:12px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid #f3f4f6">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="sched-dot" style="width:8px;height:8px;border-radius:50%;background:#d1d5db;display:inline-block;flex-shrink:0"></span>
+      <span style="font-size:13px;font-weight:600;color:#111827">Scheduler paralelo</span>
     </div>
-    <div style="font-size:11px;color:#6b7280;margin-top:2px">
-      {% if ai_configured %}
-        Auto-enrich rellenará Propiedad/Marca/Agencia/Resumen automáticamente tras cada scrape.
-      {% else %}
-        Sin <code style="background:#fef3c7;padding:1px 5px;border-radius:4px">GEMINI_API_KEY</code> configurada — auto-enrich sólo guardará el cuerpo del artículo. Reinicia el servidor con la variable para activar AI.
-      {% endif %}
+    <!-- KPIs -->
+    <div style="display:flex;gap:20px;flex-wrap:wrap;flex:1">
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Workers activos</div>
+        <div id="s-workers" style="font-size:18px;font-weight:700;color:#111827">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">En cola hoy</div>
+        <div id="s-total" style="font-size:18px;font-weight:700;color:#111827">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Procesados</div>
+        <div id="s-done" style="font-size:18px;font-weight:700;color:#0d9488">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Pendientes</div>
+        <div id="s-pending" style="font-size:18px;font-weight:700;color:#f59e0b">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">En ejecución</div>
+        <div id="s-running" style="font-size:18px;font-weight:700;color:#2563eb">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Errores hoy</div>
+        <div id="s-error" style="font-size:18px;font-weight:700;color:#dc2626">—</div>
+      </div>
+      <div style="text-align:center">
+        <div style="font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em">Artículos nuevos</div>
+        <div id="s-arts" style="font-size:18px;font-weight:700;color:#7c3aed">—</div>
+      </div>
     </div>
+    <!-- Progress bar -->
+    <div style="flex:1;min-width:180px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;margin-bottom:4px">
+        <span>Progreso de hoy</span>
+        <span id="s-pct">0%</span>
+      </div>
+      <div style="height:6px;background:#f3f4f6;border-radius:6px;overflow:hidden">
+        <div id="s-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#0d9488,#2563eb);border-radius:6px;transition:width .4s"></div>
+      </div>
+    </div>
+    <!-- Actions -->
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button onclick="forceFill()" style="font-size:11px;padding:5px 12px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;cursor:pointer;font-weight:600;color:#374151">
+        ⚡ Forzar cola
+      </button>
+      <button onclick="loadSchedStatus()" style="font-size:11px;padding:5px 12px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;cursor:pointer;color:#9ca3af">
+        ↻
+      </button>
+    </div>
+  </div>
+  <!-- Recent errors -->
+  <div id="s-errors-wrap" style="display:none;padding:10px 18px;background:#fef2f2;border-top:1px solid #fecaca">
+    <div style="font-size:10px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Últimos errores</div>
+    <div id="s-errors-list" style="font-size:11px;color:#7f1d1d;display:flex;flex-direction:column;gap:4px"></div>
+  </div>
+</div>
+
+<!-- Flash messages -->
+{% if request.query_params.get('saved') %}
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#15803d;display:flex;align-items:center;gap:8px">
+  <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+  API key guardada correctamente. La extracción AI ya está activa.
+</div>
+{% endif %}
+{% if request.query_params.get('deleted') %}
+<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#991b1b;display:flex;align-items:center;gap:8px">
+  <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+  API key eliminada.
+</div>
+{% endif %}
+
+<!-- AI / API Keys card -->
+<div class="card" style="padding:0;margin-bottom:16px;overflow:hidden">
+  <div style="padding:14px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #f3f4f6;
+              {% if ai_configured %}background:#f0fdf4{% else %}background:#fffbeb{% endif %}">
+    <svg style="width:18px;height:18px;color:{% if ai_configured %}#16a34a{% else %}#d97706{% endif %};flex-shrink:0"
+         fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      {% if ai_configured %}<polyline points="20 6 9 17 4 12"/>
+      {% else %}<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>{% endif %}
+    </svg>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:600;color:{% if ai_configured %}#15803d{% else %}#b45309{% endif %}">
+        {% if ai_configured %}Extracción AI activa{% else %}Extracción AI desactivada{% endif %}
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:1px">
+        {% if ai_configured %}Auto-enrich rellenará Propiedad · Marca · Agencia · Resumen automáticamente.
+        {% else %}Configura una API key para activar el enriquecimiento AI tras cada scrape.{% endif %}
+      </div>
+    </div>
+    <button onclick="document.getElementById('api_keys_form').style.display=document.getElementById('api_keys_form').style.display==='none'?'block':'none'"
+            class="btn-ghost btn-sm">
+      {% if ai_configured %}Cambiar key{% else %}Configurar →{% endif %}
+    </button>
+  </div>
+
+  <!-- Expandable form -->
+  <div id="api_keys_form" style="display:{% if not ai_configured %}block{% else %}none{% endif %};padding:18px">
+    <form method="post" action="/settings/api-keys">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px">
+
+        <!-- Gemini -->
+        <div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#374151;margin-bottom:6px">
+            <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            Gemini API Key
+            {% if gemini_key_set %}<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">ACTIVA</span>{% endif %}
+          </label>
+          <div style="display:flex;gap:6px">
+            <input name="gemini_key" type="password" autocomplete="new-password"
+                   placeholder="{% if gemini_key_set %}{{ gemini_key_masked }}{% else %}AIza...{% endif %}"
+                   style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;font-family:monospace">
+            {% if gemini_key_set %}
+            <form method="post" action="/settings/api-keys/delete" style="display:inline">
+              <input type="hidden" name="key_name" value="GEMINI_API_KEY">
+              <button type="submit" class="btn-danger btn-sm"
+                      onclick="return confirm('¿Eliminar la Gemini API key?')"
+                      style="height:36px;padding:0 10px">×</button>
+            </form>
+            {% endif %}
+          </div>
+          <p style="font-size:10px;color:#9ca3af;margin-top:4px">
+            Consíguela en <b>aistudio.google.com</b> · modelo: gemini-2.5-flash-lite
+          </p>
+        </div>
+
+        <!-- Anthropic (fallback) -->
+        <div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#374151;margin-bottom:6px">
+            <svg style="width:13px;height:13px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+            Anthropic API Key
+            <span style="color:#9ca3af;font-weight:400">(fallback)</span>
+            {% if anthropic_key_set %}<span style="background:#dcfce7;color:#15803d;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700">ACTIVA</span>{% endif %}
+          </label>
+          <div style="display:flex;gap:6px">
+            <input name="anthropic_key" type="password" autocomplete="new-password"
+                   placeholder="{% if anthropic_key_set %}{{ anthropic_key_masked }}{% else %}sk-ant-...{% endif %}"
+                   style="flex:1;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;font-family:monospace">
+            {% if anthropic_key_set %}
+            <form method="post" action="/settings/api-keys/delete" style="display:inline">
+              <input type="hidden" name="key_name" value="ANTHROPIC_API_KEY">
+              <button type="submit" class="btn-danger btn-sm"
+                      onclick="return confirm('¿Eliminar la Anthropic API key?')"
+                      style="height:36px;padding:0 10px">×</button>
+            </form>
+            {% endif %}
+          </div>
+          <p style="font-size:10px;color:#9ca3af;margin-top:4px">
+            Se usa si Gemini no está disponible · <b>console.anthropic.com</b>
+          </p>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px">
+        <button type="submit" class="btn-primary">Guardar API keys</button>
+        <span style="font-size:11px;color:#9ca3af">
+          Se guardan en <code style="background:#f3f4f6;padding:1px 5px;border-radius:3px">.env</code>
+          en el directorio del proyecto · no se reinicia el servidor
+        </span>
+      </div>
+    </form>
   </div>
 </div>
 
 <!-- Sites table -->
-<div class="card" style="overflow:hidden">
-  <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
-    <span style="font-size:13px;font-weight:600;color:#111827">Frecuencia de scraping por medio</span>
-    <a href="/sites" style="font-size:12px;color:#14b8a6;text-decoration:none">Gestionar sitios →</a>
+<style>
+  .settings-table th, .settings-table td { padding:8px 10px; font-size:12px; vertical-align:middle; }
+  .settings-table th { font-size:10px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.05em; text-align:left; }
+  .settings-table input[type=number], .settings-table select {
+    border:1px solid #e5e7eb; border-radius:6px; font-size:12px; padding:5px 8px; width:100%;
+  }
+  .settings-table input[type=number]:focus, .settings-table select:focus {
+    border-color:#14b8a6; outline:none; box-shadow:0 0 0 2px rgba(20,184,166,.15);
+  }
+  .group-header { background:#f8fafc; padding:6px 10px; font-size:9px; font-weight:700;
+                  color:#6b7280; text-transform:uppercase; letter-spacing:.08em;
+                  border-bottom:1px solid #e5e7eb; }
+  #site-search { border:1px solid #e5e7eb; border-radius:8px; padding:7px 12px 7px 34px;
+                 font-size:13px; width:260px; outline:none; transition:border-color .15s; }
+  #site-search:focus { border-color:#14b8a6; box-shadow:0 0 0 2px rgba(20,184,166,.15); }
+  .search-wrap { position:relative; display:inline-flex; align-items:center; }
+  .search-wrap svg { position:absolute; left:10px; color:#9ca3af; pointer-events:none; }
+  .row-hidden { display:none; }
+  #search-empty { display:none; padding:32px; text-align:center; color:#9ca3af; font-size:13px; }
+  .refresh-all-btn { display:inline-flex;align-items:center;gap:6px;padding:6px 14px;
+    border-radius:8px;border:1px solid #e5e7eb;background:#fff;font-size:12px;
+    font-weight:600;color:#2563eb;cursor:pointer;transition:all .15s; }
+  .refresh-all-btn:hover { background:#eff6ff;border-color:#bfdbfe; }
+  .refresh-all-btn:disabled { opacity:.5;cursor:wait; }
+  .refresh-row-btn { display:inline-flex;align-items:center;gap:4px;padding:4px 9px;
+    border-radius:6px;border:1px solid #dbeafe;background:#eff6ff;font-size:11px;
+    font-weight:600;color:#2563eb;cursor:pointer;white-space:nowrap;transition:all .15s; }
+  .refresh-row-btn:hover { background:#dbeafe; }
+  .refresh-row-btn:disabled { opacity:.5;cursor:wait; }
+</style>
+<div class="card" style="overflow-x:auto">
+  <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:13px;font-weight:600;color:#111827">Configuración por medio</span>
+
+    <!-- Search box -->
+    <div class="search-wrap">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input id="site-search" type="search" placeholder="Buscar medio..." oninput="filterSites(this.value)" autocomplete="off">
+    </div>
+
+    <span id="search-count" style="font-size:11px;color:#9ca3af"></span>
+
+    <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+      <!-- Force-refresh all traffic -->
+      <button class="refresh-all-btn" id="refresh-all-btn" onclick="refreshAllTraffic()">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+        Actualizar tráfico de todos los medios
+      </button>
+      <a href="/sites" style="font-size:12px;color:#14b8a6;text-decoration:none;white-space:nowrap">Gestionar sitios →</a>
+    </div>
   </div>
-  <table style="width:100%;border-collapse:collapse">
-    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+  <table class="settings-table" style="width:100%;border-collapse:collapse;min-width:1200px">
+    <thead style="background:#fafafa;border-bottom:2px solid #f3f4f6">
       <tr>
-        <th>Medio</th>
-        <th style="width:160px">Frecuencia</th>
-        <th style="width:140px;text-align:center">Auto-enrich</th>
-        <th>Último scrape</th>
-        <th>Próximo</th>
-        <th style="width:100px;text-align:center">Estado</th>
-        <th style="width:100px;text-align:center"></th>
+        <th rowspan="2" style="vertical-align:bottom">Medio</th>
+        <th rowspan="2" style="vertical-align:bottom;width:160px;border-left:1px solid #e5e7eb">País</th>
+        <th colspan="3" style="text-align:center;background:#f0fdfa;color:#0d9488;border-left:1px solid #e5e7eb;border-right:1px solid #e5e7eb">📰 Scraping de noticias</th>
+        <th colspan="3" style="text-align:center;background:#eff6ff;color:#2563eb;border-right:1px solid #e5e7eb">📊 Tráfico web</th>
+        <th rowspan="2" style="text-align:center;vertical-align:bottom;width:100px">Estado</th>
+        <th rowspan="2" style="text-align:center;vertical-align:bottom;width:90px"></th>
+      </tr>
+      <tr>
+        <th style="width:130px;background:#f0fdfa;border-left:1px solid #e5e7eb">Frecuencia</th>
+        <th style="width:90px;background:#f0fdfa;text-align:center">Auto-enrich</th>
+        <th style="width:130px;background:#f0fdfa;border-right:1px solid #e5e7eb">Último scrape</th>
+        <th style="width:120px;background:#eff6ff">Visitas/mes</th>
+        <th style="width:120px;background:#eff6ff">Override manual</th>
+        <th style="width:130px;background:#eff6ff;border-right:1px solid #e5e7eb">Frecuencia refresh</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="settings-tbody">
       {% for s in sites %}
-      <tr id="site_row_{{ s.id }}" style="border-bottom:1px solid #f9fafb">
+      {% set effective_visits = s.latest_visits or s.monthly_visits_manual or 0 %}
+      <tr id="site_row_{{ s.id }}" data-name="{{ s.name|lower }}" style="border-bottom:1px solid #f9fafb">
         <td>
           <div style="font-weight:500;font-size:13px;color:#111827">{{ s.name }}</div>
-          <div style="font-size:11px;color:#9ca3af">{{ s.today_count }} hoy · {{ s.total_count }} total</div>
+          <div style="font-size:10px;color:#9ca3af">{{ s.today_count }} hoy · {{ s.total_count }} total</div>
         </td>
-        <td>
-          <select id="freq_{{ s.id }}" style="border:1px solid #e5e7eb;border-radius:8px;font-size:12px;padding:5px 10px;width:100%">
+
+        <!-- País -->
+        <td style="border-left:1px solid #f3f4f6">
+          <select id="country_{{ s.id }}"
+                  style="border:1px solid #e5e7eb;border-radius:6px;font-size:12px;padding:5px 8px;width:100%;min-width:140px">
+            {% for code, name, flag in countries %}
+            <option value="{{ code }}" {% if s.country == code or (not s.country and code == 'WW') %}selected{% endif %}>
+              {{ flag }} {{ name }}
+            </option>
+            {% endfor %}
+          </select>
+        </td>
+
+        <!-- Scraping group -->
+        <td style="border-left:1px solid #f3f4f6">
+          <select id="freq_{{ s.id }}">
             <option value="0"  {% if s.scrape_frequency_days == 0 %}selected{% endif %}>Manual</option>
             <option value="1"  {% if s.scrape_frequency_days == 1 %}selected{% endif %}>Cada día</option>
             <option value="2"  {% if s.scrape_frequency_days == 2 %}selected{% endif %}>Cada 2 días</option>
             <option value="3"  {% if s.scrape_frequency_days == 3 %}selected{% endif %}>Cada 3 días</option>
-            <option value="7"  {% if s.scrape_frequency_days == 7 %}selected{% endif %}>1 vez/semana</option>
-            <option value="14" {% if s.scrape_frequency_days == 14 %}selected{% endif %}>Cada 2 semanas</option>
-            <option value="30" {% if s.scrape_frequency_days == 30 %}selected{% endif %}>1 vez/mes</option>
+            <option value="7"  {% if s.scrape_frequency_days == 7 %}selected{% endif %}>1/semana</option>
+            <option value="14" {% if s.scrape_frequency_days == 14 %}selected{% endif %}>Cada 2 sem.</option>
+            <option value="30" {% if s.scrape_frequency_days == 30 %}selected{% endif %}>1/mes</option>
           </select>
         </td>
         <td style="text-align:center">
-          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#6b7280">
-            <input type="checkbox" id="enrich_{{ s.id }}" {% if s.auto_enrich %}checked{% endif %} style="width:16px;height:16px;accent-color:#14b8a6">
-            <span>Activar</span>
-          </label>
+          <input type="checkbox" id="enrich_{{ s.id }}" {% if s.auto_enrich %}checked{% endif %}
+                 style="width:15px;height:15px;accent-color:#14b8a6">
         </td>
-        <td style="font-size:11px;color:#9ca3af">
+        <td style="font-size:10px;color:#9ca3af;border-right:1px solid #f3f4f6">
           {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}<span style="color:#d1d5db">Nunca</span>{% endif %}
         </td>
-        <td style="font-size:11px;color:#9ca3af" id="next_{{ s.id }}">
-          {% if s.scrape_frequency_days == 0 %}<span style="color:#d1d5db">—</span>
-          {% elif not s.last_scraped %}<span style="color:#16a34a">en próximos 5 min</span>
-          {% else %}cada {{ s.scrape_frequency_days }} día{% if s.scrape_frequency_days > 1 %}s{% endif %}{% endif %}
+
+        <!-- Traffic group -->
+        <td>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <div id="visits_val_{{ s.id }}">
+              {% if s.latest_visits %}
+                <div style="font-weight:600;color:#0d9488">
+                  {% if s.latest_visits >= 1000000 %}{{ "%.1f"|format(s.latest_visits/1000000)|replace(".",",") }}M
+                  {% elif s.latest_visits >= 1000 %}{{ "%.1f"|format(s.latest_visits/1000)|replace(".",",") }}K
+                  {% else %}{{ s.latest_visits | fmtnum }}{% endif %}
+                </div>
+                <div style="font-size:9px;color:#9ca3af">{{ s.latest_source or 'similarweb' }}</div>
+              {% elif s.monthly_visits_manual %}
+                <div style="font-weight:600;color:#374151">
+                  {% if s.monthly_visits_manual >= 1000000 %}{{ "%.1f"|format(s.monthly_visits_manual/1000000)|replace(".",",") }}M
+                  {% elif s.monthly_visits_manual >= 1000 %}{{ "%.1f"|format(s.monthly_visits_manual/1000)|replace(".",",") }}K
+                  {% else %}{{ s.monthly_visits_manual | fmtnum }}{% endif %}
+                </div>
+                <div style="font-size:9px;color:#9ca3af">manual</div>
+              {% else %}
+                <span style="color:#d1d5db">—</span>
+              {% endif %}
+            </div>
+            <button class="refresh-row-btn" id="traf_btn_{{ s.id }}"
+                    onclick="refreshOneTraffic({{ s.id }})" title="Forzar actualización de tráfico">
+              <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+              </svg>
+            </button>
+          </div>
         </td>
+        <td>
+          <input type="number" id="manual_{{ s.id }}" min="0" step="1"
+                 value="{{ s.monthly_visits_manual or '' }}"
+                 placeholder="0">
+        </td>
+        <td style="border-right:1px solid #f3f4f6">
+          <select id="traffic_freq_{{ s.id }}">
+            <option value="0"  {% if s.traffic_frequency_days == 0 %}selected{% endif %}>Manual</option>
+            <option value="1"  {% if s.traffic_frequency_days == 1 %}selected{% endif %}>Cada día</option>
+            <option value="3"  {% if s.traffic_frequency_days == 3 %}selected{% endif %}>Cada 3 días</option>
+            <option value="5"  {% if s.traffic_frequency_days == 5 %}selected{% endif %}>Cada 5 días</option>
+            <option value="7"  {% if s.traffic_frequency_days == 7 %}selected{% endif %}>1/semana</option>
+            <option value="14" {% if s.traffic_frequency_days == 14 %}selected{% endif %}>Cada 2 sem.</option>
+            <option value="30" {% if s.traffic_frequency_days == 30 %}selected{% endif %}>1/mes</option>
+          </select>
+          <div style="font-size:9px;color:#9ca3af;margin-top:2px">
+            {% if s.last_traffic_check %}último: {{ s.last_traffic_check[:10] }}{% else %}nunca{% endif %}
+          </div>
+        </td>
+
         <td style="text-align:center">
-          {% if s.active %}
-          <span class="badge badge-green">Activo</span>
-          {% else %}
-          <span class="badge badge-gray">Pausado</span>
-          {% endif %}
+          {% if s.active %}<span class="badge badge-green">Activo</span>
+          {% else %}<span class="badge badge-gray">Pausado</span>{% endif %}
         </td>
         <td style="text-align:center">
           <button onclick="saveSchedule({{ s.id }})" id="btn_{{ s.id }}"
@@ -89,12 +352,13 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="padding:48px;text-align:center;color:#9ca3af">
+      <tr><td colspan="9" style="padding:48px;text-align:center;color:#9ca3af">
         Sin medios configurados. <a href="/sites" style="color:#14b8a6">Añadir →</a>
       </td></tr>
       {% endfor %}
     </tbody>
   </table>
+  <div id="search-empty">No hay medios que coincidan con la búsqueda.</div>
 </div>
 
 <!-- How it works -->
@@ -112,8 +376,11 @@
 async function saveSchedule(siteId) {
   const btn = document.getElementById('btn_' + siteId);
   const fd  = new FormData();
-  fd.append('scrape_frequency_days', document.getElementById('freq_' + siteId).value);
-  fd.append('auto_enrich',           document.getElementById('enrich_' + siteId).checked ? 1 : 0);
+  fd.append('scrape_frequency_days',  document.getElementById('freq_'         + siteId).value);
+  fd.append('auto_enrich',            document.getElementById('enrich_'       + siteId).checked ? 1 : 0);
+  fd.append('traffic_frequency_days', document.getElementById('traffic_freq_' + siteId).value);
+  fd.append('monthly_visits_manual',  parseInt(document.getElementById('manual_' + siteId).value) || 0);
+  fd.append('country',                document.getElementById('country_'      + siteId).value);
   btn.textContent = '...';
   btn.disabled = true;
   try {
@@ -122,15 +389,6 @@ async function saveSchedule(siteId) {
     if (data.ok) {
       btn.textContent = '✓ Guardado';
       btn.style.background = '#16a34a';
-      // update next-scrape cell
-      const next = document.getElementById('next_' + siteId);
-      if (data.scrape_frequency_days === 0) {
-        next.innerHTML = '<span style="color:#d1d5db">—</span>';
-      } else if (!data.last_scraped) {
-        next.innerHTML = '<span style="color:#16a34a">en próximos 5 min</span>';
-      } else {
-        next.textContent = `cada ${data.scrape_frequency_days} día${data.scrape_frequency_days>1?'s':''}`;
-      }
     } else {
       btn.textContent = '✗ Error';
       btn.style.background = '#dc2626';
@@ -145,5 +403,124 @@ async function saveSchedule(siteId) {
     btn.disabled = false;
   }, 2000);
 }
+
+// ── Scheduler status widget ────────────────────────────────────────────────
+async function loadSchedStatus() {
+  try {
+    const d = await fetch('/scheduler/status').then(r => r.json())
+    const q = d.queue
+    const w = d.workers
+
+    // Dot color
+    const dot = document.getElementById('sched-dot')
+    if (w.active > 0)        { dot.style.background = '#10b981'; dot.style.boxShadow = '0 0 0 3px #d1fae5' }
+    else if (q.pending > 0)  { dot.style.background = '#f59e0b' }
+    else                     { dot.style.background = '#d1d5db'; dot.style.boxShadow = '' }
+
+    document.getElementById('s-workers').textContent = w.active + ' / ' + w.scrape_workers
+    document.getElementById('s-total').textContent   = q.total || 0
+    document.getElementById('s-done').textContent    = q.done  || 0
+    document.getElementById('s-pending').textContent = q.pending || 0
+    document.getElementById('s-running').textContent = q.running || 0
+    document.getElementById('s-error').textContent   = q.error  || 0
+    document.getElementById('s-arts').textContent    = (q.new_articles || 0).toLocaleString('es-ES')
+    document.getElementById('s-pct').textContent     = (q.pct_done || 0) + '%'
+    document.getElementById('s-bar').style.width     = (q.pct_done || 0) + '%'
+
+    // Errors
+    const errsWrap = document.getElementById('s-errors-wrap')
+    const errsList = document.getElementById('s-errors-list')
+    if (d.recent_errors && d.recent_errors.length) {
+      errsWrap.style.display = 'block'
+      errsList.innerHTML = d.recent_errors.map(e =>
+        `<div><b>${e.site}</b>: <span style="color:#b91c1c">${e.error}</span> <span style="color:#9ca3af">${(e.at||'').slice(0,16)}</span></div>`
+      ).join('')
+    } else {
+      errsWrap.style.display = 'none'
+    }
+  } catch(e) {
+    console.warn('scheduler status error', e)
+  }
+}
+
+async function forceFill() {
+  const r = await fetch('/scheduler/queue/fill', { method: 'POST' }).then(r => r.json())
+  alert(`Cola rellenada: ${r.added} medios añadidos`)
+  loadSchedStatus()
+}
+
+// Load on page open and refresh every 10 seconds
+loadSchedStatus()
+setInterval(loadSchedStatus, 10000)
+
+// ── Site search ────────────────────────────────────────────────────────────
+function filterSites(q) {
+  const term  = q.trim().toLowerCase()
+  const rows  = document.querySelectorAll('#settings-tbody tr[data-name]')
+  let visible = 0
+  rows.forEach(tr => {
+    const match = !term || tr.dataset.name.includes(term)
+    tr.classList.toggle('row-hidden', !match)
+    if (match) visible++
+  })
+  const countEl = document.getElementById('search-count')
+  countEl.textContent = term ? `${visible} resultado${visible !== 1 ? 's' : ''}` : ''
+  document.getElementById('search-empty').style.display = (visible === 0 && term) ? 'block' : 'none'
+}
+
+// ── Individual traffic refresh ─────────────────────────────────────────────
+function fmtVisits(v) {
+  if (!v) return '—'
+  if (v >= 1e6) return (v/1e6).toFixed(1).replace('.', ',') + 'M'
+  if (v >= 1e3) return (v/1e3).toFixed(1).replace('.', ',') + 'K'
+  return v.toLocaleString('es-ES')
+}
+
+async function refreshOneTraffic(siteId) {
+  const btn = document.getElementById('traf_btn_' + siteId)
+  const val = document.getElementById('visits_val_' + siteId)
+  btn.disabled = true
+  btn.innerHTML = '<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" style="animation:spin .8s linear infinite"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+  try {
+    const r    = await fetch('/sites/' + siteId + '/traffic/refresh', { method: 'POST' })
+    const data = await r.json()
+    const visits = data.monthly_visits || 0
+    if (visits) {
+      val.innerHTML = `<div style="font-weight:600;color:#0d9488">${fmtVisits(visits)}</div>
+                       <div style="font-size:9px;color:#9ca3af">${data.source || 'similarweb'}</div>`
+    } else {
+      val.innerHTML = '<span style="color:#f59e0b;font-size:11px">sin datos</span>'
+    }
+    btn.style.borderColor = '#86efac'; btn.style.color = '#16a34a'
+  } catch(e) {
+    btn.style.borderColor = '#fca5a5'; btn.style.color = '#dc2626'
+  }
+  btn.innerHTML = '<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+  btn.disabled = false
+  setTimeout(() => { btn.style.borderColor = ''; btn.style.color = '' }, 3000)
+}
+
+// ── Bulk traffic refresh ───────────────────────────────────────────────────
+async function refreshAllTraffic() {
+  const btn = document.getElementById('refresh-all-btn')
+  if (!confirm('Esto actualizará las métricas de tráfico de TODOS los medios activos. Puede tardar varios minutos en segundo plano. ¿Continuar?')) return
+  btn.disabled = true
+  btn.innerHTML = '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="animation:spin .8s linear infinite"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Actualizando...'
+  try {
+    const r    = await fetch('/settings/traffic/refresh-all', { method: 'POST' })
+    const data = await r.json()
+    btn.innerHTML = `<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> ${data.queued} medios en cola`
+    btn.style.color = '#16a34a'; btn.style.borderColor = '#86efac'
+  } catch(e) {
+    btn.innerHTML = '✗ Error'
+    btn.style.color = '#dc2626'
+  }
+  setTimeout(() => {
+    btn.disabled = false
+    btn.style.color = ''; btn.style.borderColor = ''
+    btn.innerHTML = '<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Actualizar tráfico de todos los medios'
+  }, 5000)
+}
 </script>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 {% endblock %}

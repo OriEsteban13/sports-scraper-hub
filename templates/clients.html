@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Clientes · Scraper Hub{% endblock %}
+{% block page_title %}Clientes{% endblock %}
+{% block page_sub %}Cada cliente tiene búsquedas con sus propias keywords y marcas a monitorizar{% endblock %}
+
+{% block header_actions %}
+  <button onclick="document.getElementById('new_client_modal').style.display='flex'" class="btn-primary">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Nuevo cliente
+  </button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Stats cards -->
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px">
+  <div class="stat-card">
+    <div class="stat-label">Clientes</div>
+    <div class="stat-value">{{ totals.clients }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ totals.brands }} marcas en total</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Universo (30d)</div>
+    <div class="stat-value" style="color:#d97706">{{ "{:,}".format(totals.universe).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">noticias del cliente</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Menciones marca (30d)</div>
+    <div class="stat-value" style="color:#0d9488">{{ "{:,}".format(totals.mentions).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">dentro del universo</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">OTS marcas (30d)</div>
+    <div class="stat-value" style="color:#2563eb">
+      {% if totals.ots >= 1000000 %}{{ "%.1f"|format(totals.ots/1000000) }}M
+      {% elif totals.ots >= 1000 %}{{ "%.0f"|format(totals.ots/1000) }}K
+      {% else %}{{ totals.ots }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">impresiones potenciales</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">VPE marcas (30d)</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% if totals.vpe >= 1000000 %}{{ "%.1f"|format(totals.vpe/1000000) }}M€
+      {% elif totals.vpe >= 1000 %}{{ "%.0f"|format(totals.vpe/1000) }}K€
+      {% else %}{{ "%.0f"|format(totals.vpe) }}€{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">€ publicidad equivalente</div>
+  </div>
+</div>
+
+<!-- Clients table -->
+<div class="card" style="overflow:hidden">
+  <table style="width:100%;border-collapse:collapse">
+    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+      <tr>
+        <th>Cliente</th>
+        <th style="text-align:center;width:80px">Búsquedas</th>
+        <th style="text-align:center;width:80px">Marcas</th>
+        <th style="text-align:center;width:120px">Menciones</th>
+        <th style="text-align:center;width:120px">OTS</th>
+        <th style="text-align:center;width:120px">VPE</th>
+        <th style="width:130px;text-align:center">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in clients %}
+      <tr style="border-top:1px solid #f3f4f6">
+        <td>
+          <a href="/clients/{{ c.id }}" style="font-size:14px;font-weight:600;color:#111827;text-decoration:none">{{ c.name }}</a>
+          {% if c.notes %}<div style="font-size:11px;color:#9ca3af;margin-top:2px">{{ c.notes[:80] }}</div>{% endif %}
+        </td>
+        <td style="text-align:center;font-weight:500;color:#d97706">
+          {{ c.search_count }}
+        </td>
+        <td style="text-align:center">
+          <span class="badge badge-slate">{{ c.brand_count }}</span>
+        </td>
+        <td style="text-align:center;font-weight:500;color:#0d9488">{{ "{:,}".format(c.impact.total).replace(",", ".") }}</td>
+        <td style="text-align:center;font-weight:500;color:#2563eb">
+          {% if c.impact.ots >= 1000000 %}{{ "%.1f"|format(c.impact.ots/1000000) }}M
+          {% elif c.impact.ots >= 1000 %}{{ "%.0f"|format(c.impact.ots/1000) }}K
+          {% else %}{{ c.impact.ots }}{% endif %}
+        </td>
+        <td style="text-align:center;font-weight:500;color:#7c3aed">
+          {% if c.impact.vpe >= 1000000 %}{{ "%.1f"|format(c.impact.vpe/1000000) }}M€
+          {% elif c.impact.vpe >= 1000 %}{{ "%.1f"|format(c.impact.vpe/1000) }}K€
+          {% else %}{{ "%.0f"|format(c.impact.vpe) }}€{% endif %}
+        </td>
+        <td style="text-align:center">
+          <a href="/clients/{{ c.id }}" class="btn-ghost btn-sm">Ver</a>
+          <form method="post" action="/clients/{{ c.id }}/delete" style="display:inline"
+                onsubmit="return confirm('¿Borrar el cliente «{{ c.name }}» y todas sus búsquedas y marcas?')">
+            <button type="submit" class="btn-danger btn-sm">×</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="padding:48px;text-align:center;color:#9ca3af">
+        Sin clientes todavía. Crea uno con el botón <b>Nuevo cliente</b>.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- New client modal -->
+<div id="new_client_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:white;border-radius:12px;max-width:540px;width:100%;padding:24px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+      <h2 style="font-size:16px;font-weight:600;color:#111827">Nuevo cliente</h2>
+      <button onclick="document.getElementById('new_client_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px">×</button>
+    </div>
+    <form method="post" action="/clients" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre del cliente *</label>
+        <input name="name" required placeholder="Ej: FC Barcelona"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Notas <span style="color:#9ca3af;font-weight:400">(opcional)</span></label>
+        <textarea name="notes" rows="2" placeholder="Sector, contacto, briefing breve..."
+                  style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button type="button" onclick="document.getElementById('new_client_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button type="submit" class="btn-primary">Crear cliente</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

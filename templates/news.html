@@ -5,6 +5,15 @@
 {% block page_sub %}Tabla de artículos por noticia — {{ filter_date }}{% endblock %}
 
 {% block header_actions %}
+  <a href="/export/articles.xlsx{% if filter_date or search_q %}?{% if filter_date %}date_filter={{ filter_date }}{% endif %}{% if search_q %}{% if filter_date %}&{% endif %}q={{ search_q | urlencode }}{% endif %}{% endif %}"
+     class="btn-ghost" title="Exportar Excel">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Excel
+  </a>
+  <button onclick="analyzeAllSentiment()" id="sentiment_all_btn" class="btn-ghost" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+    <span id="sentiment_all_label">Sentiment todos</span>
+  </button>
   <button onclick="enrichAll()" id="enrich_all_btn" class="btn-ghost" style="border:1px solid #fde68a;background:#fffbeb;color:#b45309">
     <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
     <span id="enrich_all_label">Enriquecer todos</span>
@@ -18,6 +27,21 @@
 {% endblock %}
 
 {% block content %}
+<style>
+.sentiment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.sentiment-positive { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+.sentiment-negative { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+.sentiment-neutral  { background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0; }
+</style>
 <div x-data="newsPage()">
 
   <!-- Filters bar -->
@@ -32,22 +56,60 @@
     </div>
     <button type="submit" class="btn-primary" style="font-size:12px;padding:5px 12px">Buscar</button>
     {% if search_q %}
+    <button type="button" onclick="saveCurrentSearch()" class="btn-ghost" style="font-size:11px;padding:5px 10px" title="Guardar como búsqueda recurrente">
+      <svg style="width:12px;height:12px;display:inline;vertical-align:middle" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+      Guardar
+    </button>
     <a href="/news" style="font-size:11px;color:#9ca3af;text-decoration:none">Limpiar</a>
     {% endif %}
 
-    <!-- Date filter (hidden when searching, since search spans all dates) -->
+    <!-- Date filters -->
     {% if not search_q %}
-    <div style="display:flex;align-items:center;gap:8px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap" id="date-filter-wrap">
       <label style="font-size:11px;color:#6b7280;font-weight:600">FECHA</label>
-      <select name="date_filter" style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px"
-              onchange="this.form.submit()">
-        {% for d in available_dates %}
-        <option value="{{ d }}" {% if d == filter_date %}selected{% endif %}>{{ d }}</option>
-        {% endfor %}
-        {% if filter_date and filter_date not in available_dates %}
-        <option value="{{ filter_date }}" selected>{{ filter_date }}</option>
+
+      <!-- Toggle between single-date and range -->
+      <div style="display:flex;gap:2px;background:#f3f4f6;border-radius:7px;padding:2px">
+        <button type="button" id="mode-single" onclick="setDateMode('single')"
+          style="font-size:11px;padding:3px 9px;border-radius:5px;border:none;cursor:pointer;transition:all .15s;
+                 {% if not date_from and not date_to %}background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);color:#111827{% else %}background:transparent;color:#9ca3af{% endif %}">
+          Día
+        </button>
+        <button type="button" id="mode-range" onclick="setDateMode('range')"
+          style="font-size:11px;padding:3px 9px;border-radius:5px;border:none;cursor:pointer;transition:all .15s;
+                 {% if date_from or date_to %}background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);color:#111827{% else %}background:transparent;color:#9ca3af{% endif %}">
+          Rango
+        </button>
+      </div>
+
+      <!-- Single day selector -->
+      <div id="single-date-wrap" style="display:{% if date_from or date_to %}none{% else %}flex{% endif %};align-items:center;gap:6px">
+        <select name="date_filter" style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px"
+                onchange="this.form.submit()">
+          {% for d in available_dates %}
+          <option value="{{ d }}" {% if d == filter_date %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+          {% if filter_date and filter_date not in available_dates %}
+          <option value="{{ filter_date }}" selected>{{ filter_date }}</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <!-- Range picker -->
+      <div id="range-date-wrap" style="display:{% if date_from or date_to %}flex{% else %}none{% endif %};align-items:center;gap:6px">
+        <input type="date" name="date_from" value="{{ date_from }}"
+               style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px;color:#374151"
+               max="{{ available_dates[0] if available_dates else '' }}">
+        <span style="font-size:11px;color:#9ca3af">→</span>
+        <input type="date" name="date_to" value="{{ date_to }}"
+               style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:5px 10px;color:#374151"
+               max="{{ available_dates[0] if available_dates else '' }}">
+        <button type="submit" style="background:#0d9488;color:#fff;border:none;border-radius:8px;
+                padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">Aplicar</button>
+        {% if date_from or date_to %}
+        <a href="/news" style="font-size:11px;color:#9ca3af;text-decoration:none">✕</a>
         {% endif %}
-      </select>
+      </div>
     </div>
     {% endif %}
 
@@ -75,6 +137,96 @@
     </div>
   </form>
 
+  <!-- Search KPIs + charts (only when search is active) -->
+  {% if search_kpis %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+    <div class="stat-card" style="padding:14px">
+      <div class="stat-label" style="font-size:10px">Resultados totales</div>
+      <div class="stat-value" style="font-size:24px;margin:4px 0 0">{{ search_kpis.total | fmtnum }}</div>
+    </div>
+    <div class="stat-card" style="padding:14px">
+      <div class="stat-label" style="font-size:10px">Hoy</div>
+      <div class="stat-value" style="font-size:24px;margin:4px 0 0;color:{% if search_kpis.today > 0 %}#0d9488{% else %}#9ca3af{% endif %}">{{ search_kpis.today | fmtnum }}</div>
+    </div>
+    <div class="stat-card" style="padding:14px" title="Opportunities To See — pendiente de configurar por medio">
+      <div class="stat-label" style="font-size:10px">OTS</div>
+      <div class="stat-value" style="font-size:24px;margin:4px 0 0;color:{% if search_kpis.ots %}#111827{% else %}#d1d5db{% endif %}">
+        {% if search_kpis.ots %}{{ search_kpis.ots | fmtnum }}{% else %}—{% endif %}
+      </div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:2px">próximamente</div>
+    </div>
+    <div class="stat-card" style="padding:14px" title="Valor Publicitario Equivalente — pendiente de configurar por medio">
+      <div class="stat-label" style="font-size:10px">VPE</div>
+      <div class="stat-value" style="font-size:24px;margin:4px 0 0;color:{% if search_kpis.vpe %}#111827{% else %}#d1d5db{% endif %}">
+        {% if search_kpis.vpe %}{{ search_kpis.vpe | fmtnum }}€{% else %}—{% endif %}
+      </div>
+      <div style="font-size:10px;color:#9ca3af;margin-top:2px">próximamente</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="card" style="padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600;color:#111827">Evolución 30 días para «{{ search_q }}»</span>
+        <span style="font-size:10px;color:#9ca3af">artículos por día</span>
+      </div>
+      <div style="height:160px"><canvas id="searchTrend"></canvas></div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600;color:#111827">Top medios</span>
+        <span style="font-size:10px;color:#9ca3af">total</span>
+      </div>
+      <div style="height:160px"><canvas id="searchSites"></canvas></div>
+    </div>
+  </div>
+
+  <script>
+    const _kpis = {{ search_kpis | tojson }};
+    new Chart(document.getElementById('searchTrend').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: _kpis.series.map(d => d.date.slice(5)),
+        datasets: [{
+          data: _kpis.series.map(d => d.count),
+          borderColor: '#0d9488',
+          backgroundColor: 'rgba(20,184,166,.12)',
+          fill: true, tension: 0.3, pointRadius: 2, pointHoverRadius: 5,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { font:{size:10}, color:'#9ca3af', precision:0 }, grid: { color:'#f3f4f6' } },
+          x: { ticks: { font:{size:10}, color:'#9ca3af', maxRotation:0, autoSkipPadding:8 }, grid: { display:false } }
+        }
+      }
+    });
+    new Chart(document.getElementById('searchSites').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: _kpis.top_sites.map(s => s.name),
+        datasets: [{
+          data: _kpis.top_sites.map(s => s.count),
+          backgroundColor: ['#0d9488','#2563eb','#7c3aed','#d97706','#dc2626'],
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { beginAtZero: true, ticks: { font:{size:10}, color:'#9ca3af', precision:0 }, grid: { color:'#f3f4f6' } },
+          y: { ticks: { font:{size:10}, color:'#374151' }, grid: { display:false } }
+        }
+      }
+    });
+  </script>
+  {% endif %}
+
   <!-- Table -->
   <div class="card" style="overflow:hidden">
     <table style="width:100%;border-collapse:collapse">
@@ -84,17 +236,20 @@
             <input type="checkbox" style="width:14px;height:14px" @change="toggleAll($event)">
           </th>
           <th>Titular</th>
+          <th style="width:80px;text-align:center">Fecha</th>
+          <th style="width:80px;text-align:right" title="OTS = Tráfico diario estimado del medio (visitas/mes ÷ 30)">OTS</th>
           <th style="width:130px">Propiedad</th>
           <th style="width:130px">Marca</th>
           <th style="width:110px">Agencia</th>
           <th>Resumen</th>
+          <th style="width:90px;text-align:center">Sentiment</th>
           <th style="width:90px;text-align:center">Contenido</th>
           <th style="width:110px;text-align:center">Acciones</th>
         </tr>
       </thead>
       <tbody>
         {% for a in articles %}
-        <tr id="row_{{ a.id }}" style="border-bottom:1px solid #f9fafb">
+        <tr id="row_{{ a.id }}" style="border-bottom:1px solid #f9fafb;content-visibility:auto;contain-intrinsic-size:0 52px">
 
           <!-- Checkbox -->
           <td>
@@ -109,6 +264,28 @@
                style="font-size:13px;color:#111827;text-decoration:none;display:block;line-height:1.4"
                class="line-clamp-2">{{ a.title }}</a>
             <div style="font-size:10px;color:#9ca3af;margin-top:2px">{{ a.site_name }}</div>
+          </td>
+
+          <!-- Fecha -->
+          <td style="text-align:center;font-size:11px;white-space:nowrap;color:#6b7280">
+            {{ a.scrape_date or '—' }}
+          </td>
+
+          <!-- OTS -->
+          <td style="text-align:right;font-size:11px">
+            {% set ots = (a.site_monthly_visits or 0) // 30 %}
+            {% if ots %}
+              {% if ots >= 1000000 %}
+                <span style="font-weight:600;color:#0d9488">{{ "%.1f"|format(ots/1000000)|replace(".",",") }}M</span>
+              {% elif ots >= 1000 %}
+                <span style="font-weight:600;color:#0d9488">{{ "%.1f"|format(ots/1000)|replace(".",",") }}K</span>
+              {% else %}
+                <span style="color:#374151">{{ ots | fmtnum }}</span>
+              {% endif %}
+              <div style="font-size:9px;color:#9ca3af">/día</div>
+            {% else %}
+              <span style="color:#d1d5db">—</span>
+            {% endif %}
           </td>
 
           <!-- Propiedad -->
@@ -140,6 +317,23 @@
             <span id="summary_text_{{ a.id }}" style="font-size:11px;color:#6b7280;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">
               {{ a.summary or '—' }}
             </span>
+          </td>
+
+          <!-- Sentiment -->
+          <td style="text-align:center" id="sentiment_cell_{{ a.id }}">
+            {% if a.sentiment == 'positive' %}
+              <span class="sentiment-badge sentiment-positive">● Positivo</span>
+            {% elif a.sentiment == 'negative' %}
+              <span class="sentiment-badge sentiment-negative">● Negativo</span>
+            {% elif a.sentiment == 'neutral' %}
+              <span class="sentiment-badge sentiment-neutral">● Neutral</span>
+            {% else %}
+              <button onclick="analyzeSentiment({{ a.id }})"
+                      style="background:none;border:1px dashed #d1d5db;cursor:pointer;color:#9ca3af;padding:2px 8px;border-radius:6px;font-size:10px"
+                      title="Analizar sentimiento">
+                Analizar
+              </button>
+            {% endif %}
           </td>
 
           <!-- Contenido / body -->
@@ -175,7 +369,7 @@
 
         <!-- Edit row (hidden by default) -->
         <tr id="edit_row_{{ a.id }}" style="display:none;background:#f0fdfa">
-          <td colspan="8" style="padding:12px 18px">
+          <td colspan="10" style="padding:12px 18px">
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr 2fr;gap:10px;max-width:900px">
               <div>
                 <label style="display:block;font-size:10px;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Propiedad</label>
@@ -217,7 +411,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="8" style="padding:48px;text-align:center;color:#9ca3af;font-size:13px">
+          <td colspan="10" style="padding:48px;text-align:center;color:#9ca3af;font-size:13px">
             <svg style="width:40px;height:40px;color:#e5e7eb;display:block;margin:0 auto 12px" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 9h16"/></svg>
             Sin artículos para {{ filter_date }}
             <form method="post" action="/scrape-all" style="margin-top:12px">
@@ -246,6 +440,7 @@
                 style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:0 4px">×</button>
       </div>
     </div>
+    <div id="body_modal_media" style="padding:0 24px;border-bottom:1px solid #f3f4f6;display:none"></div>
     <div id="body_modal_content" style="padding:24px 28px;overflow-y:auto;font-size:14px;line-height:1.75;color:#374151;white-space:pre-wrap;font-family:Georgia,'Times New Roman',serif;flex:1"></div>
   </div>
 </div>
@@ -315,6 +510,7 @@ async function enrichArticle(id) {
             style="background:#f0fdfa;color:#0d9488;border:none;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500">Ver</button>`;
         }
       }
+      if (data.sentiment) renderSentimentBadge(id, data.sentiment);
       btn.style.color = '#16a34a';
     }
   } catch(e) {
@@ -349,9 +545,12 @@ async function openBody(id) {
   const titleEl = document.getElementById('body_modal_title');
   const linkEl  = document.getElementById('body_modal_link');
   const content = document.getElementById('body_modal_content');
+  const media   = document.getElementById('body_modal_media');
   titleEl.textContent = 'Cargando…';
   linkEl.href = '#';
   content.textContent = '';
+  media.innerHTML = '';
+  media.style.display = 'none';
   modal.style.display = 'flex';
   try {
     const r = await fetch('/articles/' + id + '/body');
@@ -360,6 +559,7 @@ async function openBody(id) {
       titleEl.textContent = data.title || '';
       linkEl.href = data.url || '#';
       content.textContent = data.body || '(Sin contenido raspado. Pulsa el botón ⚡ para enriquecer.)';
+      renderMedia(data.images || [], data.videos || []);
     } else {
       content.textContent = 'Error cargando el contenido.';
     }
@@ -368,12 +568,85 @@ async function openBody(id) {
   }
 }
 
+function renderMedia(images, videos) {
+  const media = document.getElementById('body_modal_media');
+  if (!images.length && !videos.length) return;
+
+  let html = '<div style="padding:14px 0">';
+  html += `<div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Imágenes (${images.length}) y vídeos (${videos.length})</div>`;
+  html += '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px">';
+
+  images.forEach(src => {
+    html += `<div style="flex-shrink:0;width:140px">
+      <a href="${src}" target="_blank" rel="noopener">
+        <img src="${src}" loading="lazy" referrerpolicy="no-referrer"
+             style="width:140px;height:90px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;background:#f9fafb"
+             onerror="this.style.display='none';this.parentElement.parentElement.querySelector('.url').style.display='block'">
+      </a>
+      <a href="${src}" target="_blank" rel="noopener" class="url"
+         style="display:none;font-size:10px;color:#9ca3af;word-break:break-all;margin-top:4px">${src.split('/').pop()}</a>
+    </div>`;
+  });
+
+  videos.forEach(src => {
+    const isYT = /youtube\.com|youtu\.be/.test(src);
+    const isVM = /vimeo\.com/.test(src);
+    html += `<div style="flex-shrink:0;width:200px;height:90px;border-radius:6px;border:1px solid #e5e7eb;background:#0d1117;color:white;display:flex;align-items:center;justify-content:center;text-decoration:none">
+      <a href="${src}" target="_blank" rel="noopener" style="color:white;text-decoration:none;font-size:11px;text-align:center;padding:8px">
+        <svg style="width:24px;height:24px;display:block;margin:0 auto 4px" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        ${isYT ? 'YouTube' : isVM ? 'Vimeo' : 'Video'}
+      </a>
+    </div>`;
+  });
+
+  html += '</div></div>';
+  media.innerHTML = html;
+  media.style.display = 'block';
+}
+
+async function saveCurrentSearch() {
+  const q = new URLSearchParams(window.location.search).get('q') || '';
+  if (!q) { alert('No hay búsqueda activa'); return; }
+  const name = prompt('Nombre para esta búsqueda:', q);
+  if (!name) return;
+  const fd = new FormData();
+  fd.append('name',  name);
+  fd.append('query', q);
+  const r = await fetch('/searches', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (d.ok) {
+    if (confirm('Búsqueda guardada. ¿Ir al dashboard para ver KPIs?')) location.href = '/';
+  } else alert('Error guardando');
+}
+
 async function copyBodyText() {
   const txt = document.getElementById('body_modal_content').textContent;
   try {
     await navigator.clipboard.writeText(txt);
     alert('Contenido copiado al portapapeles');
   } catch { alert('No se pudo copiar'); }
+}
+
+// ── Date mode toggle ──────────────────────────────────────────────────────
+function setDateMode(mode) {
+  const single = document.getElementById('single-date-wrap')
+  const range  = document.getElementById('range-date-wrap')
+  const btnS   = document.getElementById('mode-single')
+  const btnR   = document.getElementById('mode-range')
+  const active = 'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1);color:#111827'
+  const idle   = 'background:transparent;color:#9ca3af'
+  if (mode === 'single') {
+    single.style.display = 'flex'; range.style.display = 'none'
+    btnS.style.cssText += active;  btnR.style.cssText += idle
+    // Clear range params from inputs so they don't get submitted
+    range.querySelectorAll('input[type=date]').forEach(i => i.disabled = true)
+    single.querySelectorAll('select,input').forEach(i => i.disabled = false)
+  } else {
+    single.style.display = 'none'; range.style.display = 'flex'
+    btnR.style.cssText += active;  btnS.style.cssText += idle
+    single.querySelectorAll('select,input').forEach(i => i.disabled = true)
+    range.querySelectorAll('input[type=date]').forEach(i => i.disabled = false)
+  }
 }
 
 document.getElementById('body_modal')?.addEventListener('click', function(e) {
@@ -386,7 +659,76 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-// Concurrency-limited bulk enrich
+// ── Sentiment ──────────────────────────────────────────────────────────────
+const SENTIMENT_STYLES = {
+  positive: { text: '● Positivo', cls: 'sentiment-positive' },
+  negative: { text: '● Negativo', cls: 'sentiment-negative' },
+  neutral:  { text: '● Neutral',  cls: 'sentiment-neutral'  },
+};
+
+function renderSentimentBadge(id, sentiment) {
+  const cell = document.getElementById('sentiment_cell_' + id);
+  if (!cell) return;
+  const s = SENTIMENT_STYLES[sentiment];
+  if (s) {
+    cell.innerHTML = `<span class="sentiment-badge ${s.cls}">${s.text}</span>`;
+  } else {
+    cell.innerHTML = `<button onclick="analyzeSentiment(${id})"
+      style="background:none;border:1px dashed #d1d5db;cursor:pointer;color:#9ca3af;padding:2px 8px;border-radius:6px;font-size:10px">
+      Analizar</button>`;
+  }
+}
+
+async function analyzeSentiment(id) {
+  const cell = document.getElementById('sentiment_cell_' + id);
+  if (cell) cell.innerHTML = '<span style="font-size:10px;color:#9ca3af">…</span>';
+  try {
+    const res  = await fetch('/articles/' + id + '/sentiment', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) renderSentimentBadge(id, data.sentiment);
+  } catch(e) {
+    if (cell) cell.innerHTML = '<span style="font-size:10px;color:#ef4444">Error</span>';
+  }
+}
+
+let _sentimentCancelled = false;
+
+async function analyzeAllSentiment() {
+  const btn   = document.getElementById('sentiment_all_btn');
+  const label = document.getElementById('sentiment_all_label');
+  if (btn.dataset.running === '1') {
+    _sentimentCancelled = true;
+    label.textContent = 'Cancelando...';
+    return;
+  }
+  if (!ALL_ARTICLE_IDS.length) { alert('Sin artículos'); return; }
+
+  btn.dataset.running = '1';
+  _sentimentCancelled = false;
+  label.textContent = 'Analizando...';
+
+  // Send all IDs in one bulk request (local analysis — instant)
+  try {
+    const res  = await fetch('/articles/sentiment-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ALL_ARTICLE_IDS }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      // Refresh page to show updated badges
+      label.textContent = `${data.updated} analizados · recargando…`;
+      setTimeout(() => window.location.reload(), 800);
+      return;
+    }
+  } catch(e) {
+    label.textContent = 'Error';
+  }
+  btn.dataset.running = '0';
+  setTimeout(() => label.textContent = 'Sentiment todos', 3000);
+}
+
+// ── Concurrency-limited bulk enrich
 const ALL_ARTICLE_IDS = [{% for a in articles %}{{ a.id }}{% if not loop.last %},{% endif %}{% endfor %}];
 let _enrichCancelled = false;
 
@@ -429,6 +771,7 @@ async function enrichAll() {
                 style="background:#f0fdfa;color:#0d9488;border:none;cursor:pointer;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:500">Ver</button>`;
             }
           }
+          if (data.sentiment) renderSentimentBadge(id, data.sentiment);
           ok++;
         } else { fail++; }
       } catch(e) { fail++; }

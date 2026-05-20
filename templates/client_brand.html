@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}{{ brand.name }} · {{ search.name }} · {{ client.name }} · Scraper Hub{% endblock %}
+{% block page_title %}{{ brand.name }}{% endblock %}
+{% block page_sub %}
+  <a href="/clients" style="color:#9ca3af;text-decoration:none">Clientes</a> ›
+  <a href="/clients/{{ client.id }}" style="color:#9ca3af;text-decoration:none">{{ client.name }}</a> ›
+  <a href="/clients/{{ client.id }}/searches/{{ search.id }}" style="color:#9ca3af;text-decoration:none">{{ search.name }}</a> ›
+  <span style="color:#374151">{{ brand.name }}</span>
+  · últimos {{ days }} días
+{% endblock %}
+
+{% block header_actions %}
+  <a href="/clients/{{ client.id }}/searches/{{ search.id }}" class="btn-ghost">← Volver a {{ search.name }}</a>
+  <a href="/clients/{{ client.id }}/searches/{{ search.id }}/brands/{{ brand.id }}/report.pdf"
+     class="btn-ghost" title="Descargar informe PDF" target="_blank">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    PDF
+  </a>
+  <a href="/clients/{{ client.id }}/export.xlsx" class="btn-ghost" title="Exportar Excel del cliente">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Excel
+  </a>
+{% endblock %}
+
+{% block content %}
+
+<!-- Scope banner -->
+{% if universe.configured %}
+<div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px;background:#fffbeb;border-color:#fde68a;font-size:12px">
+  <svg style="width:14px;height:14px;color:#d97706;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+    <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+  </svg>
+  <div style="color:#92400e">
+    Búsqueda «<b>{{ brand.query }}</b>» dentro del universo del cliente:
+    <b>{{ "{:,}".format(universe.total).replace(",", ".") }}</b> noticias en {{ days }}d ·
+    keywords: {% for k in client.keywords.split(',')[:5] %}<code style="background:#fde68a;padding:1px 5px;border-radius:3px;margin-right:3px">{{ k.strip() }}</code>{% endfor %}{% if client.keywords.split(',')|length > 5 %}<span style="color:#b45309">+{{ client.keywords.split(',')|length - 5 }} más</span>{% endif %}
+  </div>
+</div>
+{% else %}
+<div class="card" style="padding:12px 16px;margin-bottom:14px;background:#fef2f2;border-color:#fecaca;font-size:12px;color:#991b1b">
+  ⚠ El cliente no tiene keywords configuradas — la búsqueda cubre <b>todas</b> las noticias, no solo las del cliente.
+  <a href="/clients/{{ client.id }}" style="color:#dc2626;font-weight:600;margin-left:6px">Configurar →</a>
+</div>
+{% endif %}
+
+<!-- KPI cards -->
+<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px">
+  <div class="stat-card">
+    <div class="stat-label">Menciones ({{ days }}d)</div>
+    <div class="stat-value" style="color:#0d9488">{{ "{:,}".format(impact.total).replace(",", ".") }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ impact.today }} hoy</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">OTS estimado</div>
+    <div class="stat-value" style="color:#2563eb">
+      {% if impact.ots >= 1000000 %}{{ "%.1f"|format(impact.ots/1000000) }}M
+      {% elif impact.ots >= 1000 %}{{ "%.0f"|format(impact.ots/1000) }}K
+      {% else %}{{ impact.ots }}{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">impresiones potenciales</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">VPE</div>
+    <div class="stat-value" style="color:#7c3aed">
+      {% if impact.vpe >= 1000000 %}{{ "%.1f"|format(impact.vpe/1000000) }}M€
+      {% elif impact.vpe >= 1000 %}{{ "%.1f"|format(impact.vpe/1000) }}K€
+      {% else %}{{ "%.0f"|format(impact.vpe) }}€{% endif %}
+    </div>
+    <div style="font-size:11px;color:#9ca3af">€ publicidad equivalente</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Países activos</div>
+    <div class="stat-value" style="color:#d97706">{{ impact.by_country|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">{{ impact.by_category|length }} tipos de medio</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Medios distintos</div>
+    <div class="stat-value">{{ impact.top_sites|length }}</div>
+    <div style="font-size:11px;color:#9ca3af">fuentes con menciones</div>
+  </div>
+</div>
+
+<!-- Trend chart -->
+{% if impact.series %}
+<div class="card" style="padding:16px 18px;margin-bottom:18px">
+  <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:10px">Tendencia diaria · últimos {{ days }} días</div>
+  <svg viewBox="0 0 {{ days * 14 }} 60" style="width:100%;height:60px;display:block" preserveAspectRatio="none">
+    {% set max_c = (impact.series | map(attribute='count') | max) or 1 %}
+    {% set step = (days * 14) / (impact.series|length - 1 if impact.series|length > 1 else 1) %}
+    {% set pts = [] %}
+    {% for p in impact.series %}
+      {% set x = loop.index0 * step %}
+      {% set y = 55 - (p.count / max_c * 48) if max_c > 0 else 55 %}
+      {% set _ = pts.append("%.1f,%.1f"|format(x, y)) %}
+    {% endfor %}
+    <!-- fill area -->
+    {% set fill_pts = "0,55 " + pts|join(' ') + " " + ((impact.series|length - 1) * step)|string + ",55" %}
+    <polygon points="{{ fill_pts }}" fill="#d1fae5" opacity="0.6"/>
+    <polyline points="{{ pts|join(' ') }}" fill="none" stroke="#0d9488" stroke-width="1.5"/>
+    {% for p in impact.series %}
+      {% if p.count > 0 %}
+      {% set x = loop.index0 * step %}
+      {% set y = 55 - (p.count / max_c * 48) %}
+      <circle cx="{{ "%.1f"|format(x) }}" cy="{{ "%.1f"|format(y) }}" r="2.5" fill="#0d9488"/>
+      {% endif %}
+    {% endfor %}
+  </svg>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:#d1d5db;margin-top:4px">
+    <span>{{ impact.series[0].date }}</span>
+    <span>{{ impact.series[-1].date }}</span>
+  </div>
+</div>
+{% endif %}
+
+{% if impact.by_country or impact.by_category %}
+<!-- Country + Category distributions -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px">
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px;font-weight:600;color:#111827">Distribución por país</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa">
+        <tr>
+          <th style="padding:8px 14px">País</th>
+          <th style="padding:8px;text-align:right">Menc.</th>
+          <th style="padding:8px;text-align:right">OTS</th>
+          <th style="padding:8px 14px;text-align:right">VPE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_c = (impact.by_country | map(attribute='count') | max) or 1 %}
+        {% for c in impact.by_country %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:8px 14px">
+            <span style="font-size:14px">{{ c.flag }}</span>
+            <span style="margin-left:6px">{{ c.name }}</span>
+            <span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ c.sites }} medios)</span>
+          </td>
+          <td style="padding:8px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+              <div style="width:40px;height:4px;background:#f0fdfa;border-radius:2px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (c.count / max_c * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-weight:500">{{ c.count }}</span>
+            </div>
+          </td>
+          <td style="padding:8px;text-align:right;color:#2563eb;font-weight:500">
+            {% if c.ots >= 1000000 %}{{ "%.1f"|format(c.ots/1000000) }}M
+            {% elif c.ots >= 1000 %}{{ "%.0f"|format(c.ots/1000) }}K
+            {% else %}{{ c.ots }}{% endif %}
+          </td>
+          <td style="padding:8px 14px;text-align:right;color:#7c3aed;font-weight:500">
+            {% if c.vpe >= 1000 %}{{ "%.1f"|format(c.vpe/1000) }}K€
+            {% else %}{{ "%.0f"|format(c.vpe) }}€{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px;font-weight:600;color:#111827">Por tipo de medio</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa">
+        <tr>
+          <th style="padding:8px 14px">Categoría</th>
+          <th style="padding:8px;text-align:right">Menc.</th>
+          <th style="padding:8px;text-align:right">OTS</th>
+          <th style="padding:8px 14px;text-align:right">VPE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_c2 = (impact.by_category | map(attribute='count') | max) or 1 %}
+        {% for cat in impact.by_category %}
+        <tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:8px 14px">
+            <span class="badge badge-blue" style="font-size:11px">{{ cat.name }}</span>
+            <span style="font-size:10px;color:#9ca3af;margin-left:4px">({{ cat.sites }} medios)</span>
+          </td>
+          <td style="padding:8px;text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+              <div style="width:40px;height:4px;background:#eff6ff;border-radius:2px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#2563eb;width:{{ (cat.count / max_c2 * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-weight:500">{{ cat.count }}</span>
+            </div>
+          </td>
+          <td style="padding:8px;text-align:right;color:#2563eb;font-weight:500">
+            {% if cat.ots >= 1000000 %}{{ "%.1f"|format(cat.ots/1000000) }}M
+            {% elif cat.ots >= 1000 %}{{ "%.0f"|format(cat.ots/1000) }}K
+            {% else %}{{ cat.ots }}{% endif %}
+          </td>
+          <td style="padding:8px 14px;text-align:right;color:#7c3aed;font-weight:500">
+            {% if cat.vpe >= 1000 %}{{ "%.1f"|format(cat.vpe/1000) }}K€
+            {% else %}{{ "%.0f"|format(cat.vpe) }}€{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- All articles -->
+<div class="card" style="overflow:hidden">
+  <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:13px;font-weight:600;color:#111827">Noticias con mención</span>
+    <span style="font-size:11px;color:#9ca3af">{{ articles|length }} artículo{{ 's' if articles|length != 1 }} · últimos {{ days }} días</span>
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead style="background:#fafafa">
+      <tr>
+        <th style="padding:10px 14px">Titular</th>
+        <th style="padding:10px;width:150px">Medio</th>
+        <th style="padding:10px;width:80px">País</th>
+        <th style="padding:10px;width:90px">Posición</th>
+        <th style="padding:10px;width:90px">Fecha</th>
+        <th style="padding:10px;width:70px;text-align:right">OTS</th>
+        <th style="padding:10px 14px;width:70px;text-align:right">VPE</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in articles %}
+      <tr style="border-top:1px solid #f3f4f6">
+        <td style="padding:10px 14px;max-width:420px">
+          <a href="{{ a.article_url or '#' }}" target="_blank"
+             style="color:#374151;text-decoration:none;line-height:1.4;display:block">{{ a.title }}</a>
+          <span style="font-size:10px;color:#9ca3af">{{ a.site_name }} · {{ a.category }}</span>
+        </td>
+        <td style="padding:10px;color:#6b7280">
+          <span style="font-size:13px">{{ a.flag }}</span>
+          <span style="font-size:11px;margin-left:3px">{{ a.country }}</span>
+        </td>
+        <td style="padding:10px">
+          {% if a.ots >= 1000000 %}{{ "%.1f"|format(a.ots/1000000) }}M{% elif a.ots >= 1000 %}{{ "%.0f"|format(a.ots/1000) }}K{% else %}{{ a.ots }}{% endif %}
+          <span style="font-size:10px;color:#9ca3af;display:block">visitas/día</span>
+        </td>
+        <td style="padding:10px">
+          {% if a.position == 'title' %}
+            <span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600">Titular ×2</span>
+          {% elif a.position == 'summary' %}
+            <span style="background:#eff6ff;color:#1d4ed8;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600">Resumen ×1.5</span>
+          {% else %}
+            <span style="background:#f3f4f6;color:#6b7280;padding:2px 7px;border-radius:10px;font-size:10px">Cuerpo ×1</span>
+          {% endif %}
+        </td>
+        <td style="padding:10px;color:#9ca3af">{{ a.scrape_date }}</td>
+        <td style="padding:10px;text-align:right;color:#2563eb;font-weight:500">
+          {% if a.ots >= 1000 %}{{ "%.0f"|format(a.ots/1000) }}K
+          {% else %}{{ a.ots }}{% endif %}
+        </td>
+        <td style="padding:10px 14px;text-align:right;color:#7c3aed;font-weight:500">
+          {% if a.vpe >= 1000 %}{{ "%.1f"|format(a.vpe/1000) }}K€
+          {% else %}{{ "%.0f"|format(a.vpe) }}€{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="padding:48px;text-align:center;color:#9ca3af">
+        Sin menciones de <b>{{ brand.name }}</b> en los últimos {{ days }} días dentro del universo del cliente.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

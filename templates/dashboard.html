@@ -17,8 +17,12 @@
 {% endblock %}
 
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link  rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
 
-<!-- Search bar (redirects to /news?q=...) -->
+<!-- Search bar -->
 <form method="get" action="/news" class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px">
   <svg style="width:18px;height:18px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
   <input type="text" name="q" placeholder="Buscar en titulares, contenido, marcas, propiedades..."
@@ -28,7 +32,6 @@
 
 <!-- Stats -->
 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
-
   <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div class="stat-label">Sitios Activos</div>
@@ -36,10 +39,9 @@
         <svg style="width:18px;height:18px;color:#0d9488" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10"/></svg>
       </div>
     </div>
-    <div class="stat-value">{{ stats.sites }}</div>
+    <div class="stat-value">{{ stats.sites | fmtnum }}</div>
     <a href="/sites" class="stat-link">Ver sitios →</a>
   </div>
-
   <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div class="stat-label">Artículos Hoy</div>
@@ -47,10 +49,9 @@
         <svg style="width:18px;height:18px;color:#2563eb" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"/><path d="M4 9h16"/></svg>
       </div>
     </div>
-    <div class="stat-value">{{ stats.today }}</div>
+    <div class="stat-value">{{ stats.today | fmtnum }}</div>
     <a href="/news" class="stat-link">Ver noticias →</a>
   </div>
-
   <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div class="stat-label">Total Artículos</div>
@@ -58,10 +59,9 @@
         <svg style="width:18px;height:18px;color:#7c3aed" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
       </div>
     </div>
-    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-value">{{ stats.total | fmtnum }}</div>
     <a href="/aggregated" class="stat-link">Ver agregado →</a>
   </div>
-
   <div class="stat-card" style="display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div class="stat-label">Correos Enviados</div>
@@ -69,16 +69,167 @@
         <svg style="width:18px;height:18px;color:#d97706" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
       </div>
     </div>
-    <div class="stat-value">{{ stats.emails }}</div>
+    <div class="stat-value">{{ stats.emails | fmtnum }}</div>
     <a href="/email" class="stat-link">Ver correos →</a>
   </div>
-
 </div>
 
-<!-- Two columns -->
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<!-- Daily evolution (last 30 days) -->
+<div class="card" style="padding:18px;margin-bottom:20px">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <span style="font-size:13px;font-weight:600;color:#111827">Evolución diaria (últimos 30 días)</span>
+    <span style="font-size:11px;color:#9ca3af">Total artículos por día</span>
+  </div>
+  <div style="height:200px"><canvas id="globalChart"></canvas></div>
+</div>
 
-  <!-- Sites -->
+<!-- Geographic distribution -->
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">
+  <div class="card" style="padding:18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:13px;font-weight:600;color:#111827">Distribución geográfica (últimos 30 días)</span>
+      <span style="font-size:11px;color:#9ca3af">artículos por país del medio</span>
+    </div>
+    <div id="worldMap" style="height:340px"></div>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+      <span style="font-size:13px;font-weight:600;color:#111827">Por país</span>
+    </div>
+    <div style="overflow-y:auto;max-height:340px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:#fafafa">
+          <tr>
+            <th style="padding:8px 14px;text-align:left;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">País</th>
+            <th style="padding:8px;text-align:right;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">Medios</th>
+            <th style="padding:8px 14px;text-align:right;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">Artículos</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set max_c = (country_dist | map(attribute='count') | max) or 1 %}
+          {% for cd in country_dist %}
+          <tr style="border-top:1px solid #f3f4f6">
+            <td style="padding:8px 14px">
+              <span style="font-size:14px">{{ cd.flag }}</span>
+              <span style="margin-left:6px;color:#111827">{{ cd.name }}</span>
+            </td>
+            <td style="padding:8px;text-align:right;color:#9ca3af">{{ cd.sites }}</td>
+            <td style="padding:8px 14px;text-align:right">
+              <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                <div style="width:50px;height:4px;background:#f0fdfa;border-radius:2px;position:relative">
+                  <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (cd.count / max_c * 100)|round|int }}%"></div>
+                </div>
+                <span style="color:#111827;font-weight:500;min-width:32px;text-align:right">{{ cd.count }}</span>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" style="padding:32px;text-align:center;color:#9ca3af">Sin datos todavía</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function initWorldMap(){
+  const data = {{ country_dist | tojson }};
+  // Map data: skip "WW" (global) on the geographic map; show in list only
+  const values = {};
+  data.forEach(d => { if (d.code !== 'WW') values[d.code] = d.count; });
+  const lookup = Object.fromEntries(data.map(d => [d.code, d]));
+
+  if (typeof jsVectorMap === 'undefined') {
+    document.getElementById('worldMap').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:12px">Mapa no disponible (sin conexión a CDN)</div>';
+    return;
+  }
+
+  new jsVectorMap({
+    selector: '#worldMap',
+    map: 'world',
+    backgroundColor: 'transparent',
+    zoomButtons: true,
+    regionStyle: {
+      initial:  { fill: '#f3f4f6', stroke: '#e5e7eb', strokeWidth: 0.5 },
+      hover:    { fill: '#5eead4', cursor: 'pointer' },
+      selected: { fill: '#0d9488' },
+    },
+    series: {
+      regions: [{
+        attribute: 'fill',
+        scale: ['#cdf6ed', '#0d9488'],
+        normalizeFunction: 'polynomial',
+        values: values,
+      }]
+    },
+    onRegionTooltipShow(event, tooltip, code) {
+      const d = lookup[code];
+      const country = (d && d.name) ? `${d.flag} ${d.name}` : code;
+      const count = (d && d.count) ? d.count : 0;
+      tooltip.text(`${country}: <b>${count}</b> artículos${d && d.sites ? ' · ' + d.sites + ' medios' : ''}`, true);
+    }
+  });
+})();
+</script>
+
+<!-- Clients -->
+<div class="card" style="overflow:hidden;margin-bottom:20px">
+  <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <span style="font-size:13px;font-weight:600;color:#111827">Clientes</span>
+      <span style="font-size:11px;color:#9ca3af;margin-left:8px">{{ dashboard_clients|length }} activos</span>
+    </div>
+    <a href="/clients" style="font-size:12px;color:#14b8a6;text-decoration:none">Gestionar →</a>
+  </div>
+  {% if dashboard_clients %}
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+      <tr>
+        <th style="padding:10px 18px;text-align:left">Cliente</th>
+        <th style="padding:10px;text-align:center;width:80px">Búsquedas</th>
+        <th style="padding:10px;text-align:center;width:80px">Marcas</th>
+        <th style="padding:10px;text-align:center;width:100px">Menciones 30d</th>
+        <th style="padding:10px;text-align:center;width:100px">OTS 30d</th>
+        <th style="padding:10px 18px;text-align:center;width:100px">VPE 30d</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in dashboard_clients %}
+      <tr style="border-top:1px solid #f3f4f6">
+        <td style="padding:10px 18px">
+          <a href="/clients/{{ c.id }}" style="font-weight:600;color:#111827;text-decoration:none;font-size:13px">{{ c.name }}</a>
+          {% if c.notes %}<div style="font-size:10px;color:#9ca3af;margin-top:1px">{{ c.notes[:60] }}</div>{% endif %}
+        </td>
+        <td style="padding:10px;text-align:center;color:#d97706;font-weight:500">{{ c.search_count }}</td>
+        <td style="padding:10px;text-align:center">
+          <span class="badge badge-slate">{{ c.brand_count }}</span>
+        </td>
+        <td style="padding:10px;text-align:center;font-weight:600;color:#0d9488">{{ c.impact.total | fmtnum }}</td>
+        <td style="padding:10px;text-align:center;font-weight:600;color:#2563eb">
+          {% if c.impact.ots >= 1000000 %}{{ "%.1f"|format(c.impact.ots/1000000)|replace(".",",") }}M
+          {% elif c.impact.ots >= 1000 %}{{ "%.0f"|format(c.impact.ots/1000) }}K
+          {% else %}{{ c.impact.ots | fmtnum }}{% endif %}
+        </td>
+        <td style="padding:10px 18px;text-align:center;font-weight:600;color:#7c3aed">
+          {% if c.impact.vpe >= 1000000 %}{{ "%.1f"|format(c.impact.vpe/1000000)|replace(".",",") }}M€
+          {% elif c.impact.vpe >= 1000 %}{{ "%.1f"|format(c.impact.vpe/1000)|replace(".",",") }}K€
+          {% else %}{{ c.impact.vpe | fmtnum }}€{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">
+    Sin clientes todavía. <a href="/clients" style="color:#14b8a6">Crear cliente →</a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Two columns: sites & recent articles -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
   <div class="card" style="overflow:hidden">
     <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:13px;font-weight:600;color:#111827">Sitios Registrados</span>
@@ -86,7 +237,7 @@
     </div>
     <table style="width:100%;border-collapse:collapse">
       <thead style="background:#fafafa">
-        <tr><th>Sitio</th><th style="text-align:center">Hoy</th><th>Último scrape</th><th style="text-align:center">Acción</th></tr>
+        <tr><th>Sitio</th><th style="text-align:center">Hoy</th><th>Último scrape</th></tr>
       </thead>
       <tbody>
         {% for s in sites %}
@@ -101,16 +252,9 @@
           <td style="font-size:11px;color:#9ca3af">
             {% if s.last_scraped %}{{ s.last_scraped[:16].replace('T',' ') }}{% else %}—{% endif %}
           </td>
-          <td style="text-align:center">
-            <form method="post" action="/sites/{{ s.id }}/scrape" x-data="{l:false}" @submit="l=true" style="display:inline">
-              <button type="submit" class="btn btn-sm" style="color:#14b8a6;background:none;border:none;cursor:pointer;padding:4px 8px" :disabled="l">
-                <span x-text="l?'...':'Scrapar'">Scrapar</span>
-              </button>
-            </form>
-          </td>
         </tr>
         {% else %}
-        <tr><td colspan="4" style="padding:32px;text-align:center;color:#9ca3af;font-size:13px">
+        <tr><td colspan="3" style="padding:32px;text-align:center;color:#9ca3af;font-size:13px">
           No hay sitios. <a href="/sites" style="color:#14b8a6">Añadir →</a>
         </td></tr>
         {% endfor %}
@@ -118,7 +262,6 @@
     </table>
   </div>
 
-  <!-- Recent articles -->
   <div class="card" style="overflow:hidden">
     <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
       <span style="font-size:13px;font-weight:600;color:#111827">Artículos de Hoy</span>
@@ -134,15 +277,88 @@
         </div>
       </div>
       {% else %}
-      <div style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">
-        Sin artículos hoy.
-        <form method="post" action="/scrape-all" style="display:inline;margin-left:4px">
-          <button style="color:#14b8a6;background:none;border:none;cursor:pointer;font-size:13px">Scrapar ahora →</button>
-        </form>
-      </div>
+      <div style="padding:40px;text-align:center;color:#9ca3af;font-size:13px">Sin artículos hoy.</div>
       {% endfor %}
     </div>
   </div>
-
 </div>
+
+<!-- Save search modal -->
+<div id="save_search_modal" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.4);align-items:center;justify-content:center;padding:24px">
+  <div style="background:white;border-radius:12px;max-width:480px;width:100%;padding:24px" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <h2 style="font-size:15px;font-weight:600;color:#111827">Nueva búsqueda guardada</h2>
+      <button onclick="document.getElementById('save_search_modal').style.display='none'"
+              style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1">×</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Nombre</label>
+        <input id="ss_name" placeholder="Ej: Patrocinios LaLiga"
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px">Keywords</label>
+        <input id="ss_query" placeholder="Ej: LaLiga, Premier League, patrocinio..."
+               style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px">
+        <p style="font-size:11px;color:#9ca3af;margin-top:4px">Busca en titular, body, marca, agencia y propiedad. Insensible a mayúsculas.</p>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button onclick="document.getElementById('save_search_modal').style.display='none'" class="btn-ghost">Cancelar</button>
+        <button onclick="saveSearch()" class="btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Global daily evolution chart
+const dailyData = {{ daily_series | tojson }};
+new Chart(document.getElementById('globalChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: dailyData.map(d => d.date.slice(5)),
+    datasets: [{
+      label: 'Artículos',
+      data: dailyData.map(d => d.count),
+      borderColor: '#0d9488',
+      backgroundColor: 'rgba(20,184,166,.1)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 2,
+      pointHoverRadius: 5,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, ticks: { font: { size: 10 }, color: '#9ca3af' }, grid: { color: '#f3f4f6' } },
+      x: { ticks: { font: { size: 10 }, color: '#9ca3af', maxRotation: 0 }, grid: { display: false } }
+    }
+  }
+});
+
+async function saveSearch() {
+  const name  = document.getElementById('ss_name').value.trim();
+  const query = document.getElementById('ss_query').value.trim();
+  if (!name || !query) { alert('Nombre y keywords son obligatorios'); return; }
+  const fd = new FormData();
+  fd.append('name',  name);
+  fd.append('query', query);
+  const r = await fetch('/searches', { method: 'POST', body: fd });
+  const d = await r.json();
+  if (d.ok) location.reload(); else alert('Error guardando');
+}
+
+async function deleteSearch(id, name) {
+  if (!confirm(`¿Eliminar la búsqueda "${name}"?`)) return;
+  await fetch(`/searches/${id}/delete`, { method: 'POST' });
+  location.reload();
+}
+
+document.getElementById('save_search_modal').addEventListener('click', function(e) {
+  if (e.target === this) this.style.display = 'none';
+});
+</script>
 {% endblock %}
