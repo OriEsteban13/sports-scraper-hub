@@ -3,6 +3,15 @@
 {% block page_title %}Ajustes de scraping automático{% endblock %}
 {% block page_sub %}Configura cuándo se scrapea y enriquece cada medio{% endblock %}
 
+{% block header_actions %}
+  <a href="/export/sites.xlsx" class="btn-ghost" style="display:inline-flex;align-items:center;gap:6px">
+    <svg style="width:14px;height:14px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path d="M12 16V4M12 16l-4-4M12 16l4-4"/><rect x="4" y="18" width="16" height="2" rx="1"/>
+    </svg>
+    Exportar Excel
+  </a>
+{% endblock %}
+
 {% block content %}
 
 <!-- Scheduler status widget -->

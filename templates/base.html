@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Sports Scraper Hub{% endblock %}</title>
+  <title>{% block title %}Camaleonic Clipping{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -15,7 +15,8 @@
     /* ── Sidebar ─────────────────────────────── */
     aside { width:220px; background:#0d1117; display:flex; flex-direction:column; height:100%; flex-shrink:0; border-right:1px solid #21262d; }
     .logo-area { padding:18px 16px; border-bottom:1px solid #21262d; display:flex; align-items:center; gap:10px; }
-    .logo-icon { width:32px;height:32px;background:#14b8a6;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700;flex-shrink:0; }
+    .logo-icon { width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden; }
+    .logo-icon img { width:36px;height:36px;object-fit:contain; }
     .logo-name { color:white;font-size:14px;font-weight:600;line-height:1.2; }
     .logo-sub  { color:#6b7280;font-size:11px; }
     nav { flex:1; padding:10px; overflow-y:auto; }
@@ -86,10 +87,12 @@
 <!-- ── Sidebar ─────────────────────────────────────────────── -->
 <aside>
   <div class="logo-area">
-    <div class="logo-icon">SH</div>
+    <div class="logo-icon">
+      <img src="/static/logo.svg" alt="Camaleonic" width="36" height="36">
+    </div>
     <div>
-      <div class="logo-name">Scraper Hub</div>
-      <div class="logo-sub">Sports Intel</div>
+      <div class="logo-name">Camaleonic Clipping</div>
+      <div class="logo-sub">Media Intelligence</div>
     </div>
   </div>
 

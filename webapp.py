@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import re
@@ -131,6 +132,7 @@ class _PgConnection:
     # Convert SQLite SQL dialects to PostgreSQL on the fly
     @staticmethod
     def _fix(sql: str) -> str:
+        import re
         sql = sql.replace("?", "%s")
         sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         sql = sql.replace("(date('now'))", "CURRENT_DATE")
@@ -138,6 +140,13 @@ class _PgConnection:
         if "INSERT OR IGNORE INTO" in sql:
             sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             sql = sql.rstrip(";").rstrip() + " ON CONFLICT DO NOTHING"
+        # julianday(x) - julianday(y) → (CURRENT_DATE - y::date) days as float
+        # Pattern: julianday('now') - julianday(col)
+        sql = re.sub(
+            r"julianday\('now'\)\s*-\s*julianday\((\w+)\)",
+            r"EXTRACT(EPOCH FROM (NOW() - \1::timestamp))/86400",
+            sql
+        )
         return sql
 
     def execute(self, sql: str, params=None):
@@ -481,6 +490,7 @@ COUNTRY_BY_CODE = {c: (n, f) for c, n, f in COUNTRIES}
 
 init_db()
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ── media download ─────────────────────────────────────────────────────────────
@@ -563,9 +573,15 @@ def _parse_cookies(cookies_json: str) -> dict:
 
 def _cookie_consent_action(page):
     """Auto-click cookie/GDPR consent accept buttons on common CMP dialogs."""
+    # Wait up to 4s for any consent dialog to appear before trying selectors
+    try:
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
     # ID/class-based selectors first (fast, unambiguous)
     ID_SELECTORS = [
-        "#onetrust-accept-btn-handler",          # OneTrust
+        "#onetrust-accept-btn-handler",          # OneTrust (Reuters, many news)
         ".onetrust-accept-btn-handler",
         "#didomi-notice-agree-button",            # Didomi
         "[data-testid='consent-accept']",
@@ -575,31 +591,53 @@ def _cookie_consent_action(page):
         "[class*='cookie-accept']",
         "[id*='accept-all']",
         "[id*='acceptAll']",
+        # Cookiebot (AS.com, many Spanish sites)
+        "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll",
+        ".CybotCookiebotDialogBodyButton",
+        # Sourcepoint / WSJ
+        "[title='I Agree']",
+        "[title='Accept']",
+        "[title='Allow All']",
     ]
     # Text-based selectors ordered most-specific → least-specific
-    # has-text does substring match, so 'Accept' catches 'Accept all' too
     TEXT_SELECTORS = [
+        # Exact full-text matches first (most reliable)
+        "button:text-is('Allow All')",            # Reuters
+        "button:text-is('I Agree')",              # WSJ
+        "button:text-is('Accept all')",
+        "button:text-is('Accept All')",
+        "button:text-is('Accept')",               # DAZN
+        "button:text-is('Agree')",
+        "button:text-is('Aceptar todo')",
+        "button:text-is('Aceptar todas')",
+        "button:text-is('Aceptar')",
+        "button:text-is('Akkoord')",              # DPG Media
+        "button:text-is('Tout accepter')",
+        "button:text-is('Alle akzeptieren')",
+        "button:text-is('Alle accepteren')",
+        # Substring fallbacks
+        "button:has-text('Allow All')",           # Reuters fallback
+        "button:has-text('I Agree')",             # WSJ fallback
         "button:has-text('Accept all')",
-        "button:has-text('Accept All')",
         "button:has-text('Aceptar todo')",
-        "button:has-text('Aceptar todas')",
         "button:has-text('Tout accepter')",
-        "button:has-text('Alle akzeptieren')",
-        "button:has-text('Alle accepteren')",
-        "button:has-text('Accepter tout')",
-        "button:has-text('Akkoord')",             # DPG Media (autoweek.nl, nu.nl)
+        "button:has-text('Akkoord')",
         "button:has-text('I agree')",
-        "button:has-text('Agree')",
-        # Broader fallbacks — match any button whose visible label starts with Accept/Aceptar
-        "button:has-text('Accept')",              # DAZN, Amazon, many others
+        "button:has-text('Accept')",
         "button:has-text('Aceptar')",
+        # a-tag fallbacks (some CMPs use links)
+        "a:has-text('Accept all')",
+        "a:has-text('Allow All')",
+        "a:has-text('I Agree')",
+        "a:has-text('Akkoord')",
     ]
     for sel in ID_SELECTORS + TEXT_SELECTORS:
         try:
             btn = page.locator(sel).first
-            if btn.is_visible(timeout=1500):
+            if btn.is_visible(timeout=2000):
+                btn.scroll_into_view_if_needed()
                 btn.click()
-                page.wait_for_timeout(1200)
+                page.wait_for_timeout(1500)
                 print(f"[consent] clicked: {sel}")
                 return
         except Exception:
@@ -699,10 +737,50 @@ def _fetch_page(url: str, use_stealth: bool, cookies: dict | None = None,
     return best, best_tier
 
 
+def _fetch_rss(url: str) -> list[dict]:
+    """Parse an RSS/Atom feed and return list of {title, url}. Returns [] on failure."""
+    import xml.etree.ElementTree as ET
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+            "Accept": "application/rss+xml, application/xml, text/xml, */*",
+        })
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read()
+        root = ET.fromstring(raw)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        items = []
+        # RSS 2.0
+        for item in root.findall(".//item"):
+            title = (item.findtext("title") or "").strip()
+            link  = (item.findtext("link") or "").strip()
+            if title and link:
+                items.append({"title": title, "url": link})
+        # Atom
+        if not items:
+            for entry in root.findall(".//atom:entry", ns):
+                title = (entry.findtext("atom:title", namespaces=ns) or "").strip()
+                link_el = entry.find("atom:link", ns)
+                link = (link_el.attrib.get("href") if link_el is not None else "") or ""
+                if title and link:
+                    items.append({"title": title, "url": link})
+        print(f"[rss] {url} → {len(items)} items")
+        return items
+    except Exception as e:
+        print(f"[rss] failed {url}: {e}")
+        return []
+
+
 def fetch_site_links(url: str, css_selector: str, use_stealth: bool,
                      cookies: dict | None = None, cdp_url: str | None = None,
                      start_tier: int = 1) -> tuple[list[dict], int]:
     """Return (links, tier_used). links is list of {title, url}."""
+    # RSS/Atom feeds — bypass HTML scraping entirely
+    _url_lower = url.lower().split("?")[0]
+    if any(_url_lower.endswith(ext) for ext in (".xml", ".rss", ".atom")) or "/rss" in _url_lower or "/feed" in _url_lower:
+        return _fetch_rss(url), 1
+
     page, tier = _fetch_page(url, use_stealth, cookies=cookies, cdp_url=cdp_url, start_tier=start_tier)
     if not page:
         return [], tier
@@ -1057,6 +1135,68 @@ def analyze_sentiment_local(title: str, summary: str = "", body: str = "") -> st
     if neg > pos:
         return "negative"
     return "neutral"
+
+
+def enrich_with_ai_batch(articles: list[dict]) -> dict[int, dict]:
+    """Enrich up to 15 articles in a single AI API call.
+    articles: list of {id, title, body, site_name}
+    Returns: {article_id: {company_property, company_brand, company_agency, summary, sentiment}}
+    """
+    if not articles:
+        return {}
+    items = [{"id": a["id"], "title": (a["title"] or "")[:200],
+              "body": (a["body"] or "")[:1500], "site": (a["site_name"] or "")}
+             for a in articles]
+    prompt = (
+        "Eres un analista de sports business. Para cada artículo de la lista, extrae las entidades "
+        "mencionadas en el cuerpo (NO el menú/navegación). "
+        "NUNCA incluyas el campo 'site' como valor en los campos de salida.\n\n"
+        "Para cada artículo devuelve:\n"
+        "- company_property: propiedad deportiva (liga, club, federación, evento). Vacío si no hay.\n"
+        "- company_brand: marca comercial (patrocinador, fabricante, sponsor). Vacío si no hay.\n"
+        "- company_agency: agencia/broadcaster/plataforma OTT. Vacío si no hay.\n"
+        "- summary: resumen de 1-2 frases en español para correo profesional.\n"
+        "- sentiment: 'positive' | 'neutral' | 'negative'\n\n"
+        "Devuelve SÓLO un JSON array válido (sin markdown) con un objeto por artículo, "
+        "incluyendo el campo 'id' original:\n\n"
+        f"{json.dumps(items, ensure_ascii=False)}"
+    )
+    raw = None
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if gemini_key:
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=gemini_key)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash-lite", contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
+            raw = resp.text
+        except Exception as e:
+            print(f"[batch-ai] Gemini error: {e}")
+    if raw is None:
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if anthropic_key:
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=anthropic_key)
+                msg = client.messages.create(
+                    model="claude-haiku-4-5-20251001", max_tokens=4000,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw = msg.content[0].text
+            except Exception as e:
+                print(f"[batch-ai] Claude error: {e}")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return {int(r["id"]): r for r in parsed if "id" in r}
+    except Exception as e:
+        print(f"[batch-ai] parse error: {e}\nraw: {raw[:300]}")
+    return {}
 
 
 def enrich_with_ai(title: str, body: str, site_name: str = "") -> dict:
@@ -1548,35 +1688,18 @@ async def dashboard(request: Request):
     }
     sites = db.execute("""
         SELECT s.*,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id AND scrape_date=?) AS today_count,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id) AS total_count
-        FROM sites s WHERE s.active=1 ORDER BY s.last_scraped DESC
+               COALESCE(td.c, 0) AS today_count,
+               COALESCE(tt.c, 0) AS total_count
+        FROM sites s
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles WHERE scrape_date=? GROUP BY site_id) td ON td.site_id=s.id
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles GROUP BY site_id) tt ON tt.site_id=s.id
+        WHERE s.active=1 ORDER BY s.last_scraped DESC LIMIT 30
     """, (today,)).fetchall()
     recent = db.execute("""
         SELECT a.*, s.name AS site_name FROM articles a
         JOIN sites s ON s.id=a.site_id
         WHERE a.scrape_date=? ORDER BY a.scraped_at DESC LIMIT 8
     """, (today,)).fetchall()
-
-    # Saved searches with their KPIs
-    saved = db.execute("SELECT * FROM saved_searches ORDER BY created_at DESC").fetchall()
-    saved_kpis = [dict(s, **{"kpis": compute_search_kpis(db, s["query"])}) for s in saved]
-
-    # Clients summary for dashboard table
-    client_rows = db.execute("""
-        SELECT c.id, c.name, c.notes,
-               (SELECT COUNT(*) FROM client_searches WHERE client_id=c.id) AS search_count,
-               (SELECT COUNT(*) FROM client_brands  WHERE client_id=c.id) AS brand_count
-        FROM clients c ORDER BY c.created_at DESC
-    """).fetchall()
-    dashboard_clients = []
-    for c in client_rows:
-        brands = db.execute("SELECT query FROM client_brands WHERE client_id=?", (c["id"],)).fetchall()
-        impacts = [compute_brand_impact(db, b["query"], days=30) for b in brands]
-        agg = {"total": sum(k["total"] for k in impacts),
-               "ots":   sum(k["ots"]   for k in impacts),
-               "vpe":   sum(k["vpe"]   for k in impacts)}
-        dashboard_clients.append({**dict(c), "impact": agg})
 
     # Daily totals across all articles (last 30 days) for global chart
     daily_rows = db.execute("""
@@ -1610,11 +1733,42 @@ async def dashboard(request: Request):
         })
 
     db.close()
+    # saved_searches and dashboard_clients are loaded async via /dashboard/widgets
     return templates.TemplateResponse(request=request, name="dashboard.html", context=dict(
         request=request, active_page="dashboard",
         stats=stats, sites=sites, recent=recent, today=today,
-        saved_searches=saved_kpis, daily_series=daily_series,
-        country_dist=country_dist, dashboard_clients=dashboard_clients))
+        daily_series=daily_series, country_dist=country_dist))
+
+
+@app.get("/dashboard/widgets", response_class=JSONResponse)
+async def dashboard_widgets():
+    """Heavy widgets loaded asynchronously after the dashboard renders."""
+    db = get_db()
+    saved = db.execute("SELECT * FROM saved_searches ORDER BY created_at DESC").fetchall()
+    saved_kpis = []
+    for s in saved:
+        kpis = compute_search_kpis(db, s["query"])
+        saved_kpis.append({"id": s["id"], "name": s["name"], "query": s["query"], "kpis": kpis})
+
+    client_rows = db.execute("""
+        SELECT c.id, c.name, c.notes,
+               (SELECT COUNT(*) FROM client_searches WHERE client_id=c.id) AS search_count,
+               (SELECT COUNT(*) FROM client_brands  WHERE client_id=c.id) AS brand_count
+        FROM clients c ORDER BY c.created_at DESC
+    """).fetchall()
+    dashboard_clients = []
+    for c in client_rows:
+        brands = db.execute("SELECT query FROM client_brands WHERE client_id=?", (c["id"],)).fetchall()
+        impacts = [compute_brand_impact(db, b["query"], days=30) for b in brands]
+        agg = {"total": sum(k["total"] for k in impacts),
+               "ots":   sum(k["ots"]   for k in impacts),
+               "vpe":   sum(k["vpe"]   for k in impacts)}
+        dashboard_clients.append({"id": c["id"], "name": c["name"],
+                                   "search_count": c["search_count"],
+                                   "brand_count":  c["brand_count"],
+                                   "impact": agg})
+    db.close()
+    return {"saved_searches": saved_kpis, "clients": dashboard_clients}
 
 
 @app.post("/searches")
@@ -1666,35 +1820,51 @@ def _aggregate_impacts(impacts: list[dict]) -> dict:
 @app.get("/clients", response_class=HTMLResponse)
 async def clients_list(request: Request):
     db = get_db()
-    rows = db.execute("""
+    clients = db.execute("""
         SELECT c.*,
-               (SELECT COUNT(*) FROM client_searches WHERE client_id=c.id) AS search_count,
-               (SELECT COUNT(*) FROM client_brands  WHERE client_id=c.id) AS brand_count
-        FROM clients c ORDER BY c.created_at DESC
+               COALESCE(cs.n, 0) AS search_count,
+               COALESCE(cb.n, 0) AS brand_count
+        FROM clients c
+        LEFT JOIN (SELECT client_id, COUNT(*) AS n FROM client_searches GROUP BY client_id) cs ON cs.client_id=c.id
+        LEFT JOIN (SELECT client_id, COUNT(*) AS n FROM client_brands   GROUP BY client_id) cb ON cb.client_id=c.id
+        ORDER BY c.created_at DESC
     """).fetchall()
-    clients = []
-    total_mentions = total_ots = total_vpe = total_brands = total_searches = total_universe = 0
+    db.close()
+    # KPI totals and impact are loaded async via /clients/widgets
+    return templates.TemplateResponse(request=request, name="clients.html",
+        context=dict(request=request, active_page="clients", clients=clients))
+
+
+@app.get("/clients/widgets", response_class=JSONResponse)
+async def clients_widgets():
+    """Heavy per-client KPIs loaded asynchronously."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT c.id, c.keywords,
+               COALESCE(cs.n, 0) AS search_count,
+               COALESCE(cb.n, 0) AS brand_count
+        FROM clients c
+        LEFT JOIN (SELECT client_id, COUNT(*) AS n FROM client_searches GROUP BY client_id) cs ON cs.client_id=c.id
+        LEFT JOIN (SELECT client_id, COUNT(*) AS n FROM client_brands   GROUP BY client_id) cb ON cb.client_id=c.id
+        ORDER BY c.created_at DESC
+    """).fetchall()
+    result = []
+    total_mentions = total_ots = total_vpe = total_universe = 0
     for c in rows:
         scope = c["keywords"] or ""
         universe = compute_universe_kpis(db, scope, days=30)
-        brands = db.execute("SELECT query FROM client_brands WHERE client_id=?",
-                            (c["id"],)).fetchall()
-        impacts = [compute_brand_impact(db, b["query"], days=30, scope_query=scope)
-                   for b in brands]
+        brands = db.execute("SELECT query FROM client_brands WHERE client_id=?", (c["id"],)).fetchall()
+        impacts = [compute_brand_impact(db, b["query"], days=30, scope_query=scope) for b in brands]
         agg = {"total": sum(k["total"] for k in impacts),
                "ots":   sum(k["ots"]   for k in impacts),
                "vpe":   sum(k["vpe"]   for k in impacts)}
-        clients.append({**dict(c), "impact": agg, "universe": universe})
         total_mentions += agg["total"]; total_ots += agg["ots"]; total_vpe += agg["vpe"]
-        total_brands   += c["brand_count"]; total_searches += c["search_count"]
         total_universe += universe["total"]
+        result.append({"id": c["id"], "impact": agg, "universe": universe})
     db.close()
-    return templates.TemplateResponse(request=request, name="clients.html",
-        context=dict(request=request, active_page="clients", clients=clients,
-                     totals={"clients": len(clients), "searches": total_searches,
-                             "brands": total_brands, "mentions": total_mentions,
-                             "universe": total_universe,
-                             "ots": total_ots, "vpe": total_vpe}))
+    totals = {"mentions": total_mentions, "ots": total_ots, "vpe": total_vpe,
+              "universe": total_universe}
+    return {"clients": result, "totals": totals}
 
 
 @app.post("/clients")
@@ -1939,15 +2109,20 @@ async def sites_list(request: Request):
     today = date.today().isoformat()
     sites = db.execute("""
         SELECT s.*,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id AND scrape_date=?) AS today_count,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id) AS total_count,
-            (SELECT monthly_visits FROM site_traffic
-             WHERE site_id=s.id AND monthly_visits > 0
-             ORDER BY measured_at DESC LIMIT 1) AS latest_visits,
-            (SELECT source FROM site_traffic
-             WHERE site_id=s.id AND monthly_visits > 0
-             ORDER BY measured_at DESC LIMIT 1) AS latest_traffic_source
-        FROM sites s ORDER BY s.name
+               COALESCE(td.c, 0) AS today_count,
+               COALESCE(tt.c, 0) AS total_count,
+               st.monthly_visits  AS latest_visits,
+               st.source          AS latest_traffic_source
+        FROM sites s
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles WHERE scrape_date=? GROUP BY site_id) td ON td.site_id=s.id
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles GROUP BY site_id) tt ON tt.site_id=s.id
+        LEFT JOIN (
+            SELECT t.site_id, t.monthly_visits, t.source
+            FROM site_traffic t
+            JOIN (SELECT site_id, MAX(measured_at) AS ma FROM site_traffic WHERE monthly_visits>0 GROUP BY site_id) m
+                 ON t.site_id=m.site_id AND t.measured_at=m.ma
+        ) st ON st.site_id=s.id
+        ORDER BY s.name
     """, (today,)).fetchall()
 
     # Aggregate stats for KPI cards
@@ -2453,6 +2628,149 @@ def enrich_article(article_id: int):
     return JSONResponse(result)
 
 
+@app.post("/articles/enrich-stream")
+async def enrich_stream(request: Request):
+    """Parallel bulk enrichment with SSE progress stream.
+    Body: {"ids": [...], "batch_size": 12, "workers": 5}
+    Streams: data: {JSON}\\n\\n  per article completed.
+    """
+    body_data   = await request.json()
+    ids         = body_data.get("ids", [])
+    batch_size  = min(int(body_data.get("batch_size", 12)), 20)
+    n_workers   = min(int(body_data.get("workers", 5)), 8)
+
+    if not ids:
+        return JSONResponse({"error": "no ids"}, status_code=400)
+
+    # Preload article meta (title, url, site info) in one query
+    db = get_db()
+    ph = ",".join(["?"] * len(ids))
+    rows = db.execute(
+        f"SELECT a.id, a.title, a.article_url, a.company_property, a.company_brand, "
+        f"a.company_agency, a.summary, s.name AS site_name, s.use_stealth, "
+        f"s.cookies_json, s.cdp_url, s.last_working_tier, s.id AS site_id "
+        f"FROM articles a JOIN sites s ON s.id=a.site_id WHERE a.id IN ({ph})",
+        ids
+    ).fetchall()
+    db.close()
+    art_map = {r["id"]: dict(r) for r in rows}
+
+    publishers = None  # loaded lazily inside thread
+
+    def _scrape_one(art_id: int) -> dict:
+        """Scrape a single article page. Returns article dict enriched with body/images/videos."""
+        art = art_map.get(art_id)
+        if not art:
+            return {"id": art_id, "ok": False, "error": "not found"}
+        try:
+            cookies   = _parse_cookies(art["cookies_json"] or "")
+            cdp_url   = (art["cdp_url"] or "").strip() or None
+            start_tier = int(art["last_working_tier"] or 1)
+            full = fetch_article_full(art["article_url"], bool(art["use_stealth"]),
+                                      cookies=cookies, cdp_url=cdp_url, start_tier=start_tier)
+            return {"id": art_id, "ok": True,
+                    "title": art["title"], "site_name": art["site_name"],
+                    "site_id": art["site_id"],
+                    "body": full["body"], "images": full["images"], "videos": full["videos"],
+                    "tier": full.get("tier", start_tier)}
+        except Exception as e:
+            return {"id": art_id, "ok": False, "error": str(e)}
+
+    def _save_and_build_result(art_id: int, scraped: dict, ai_result: dict) -> dict:
+        nonlocal publishers
+        art  = art_map.get(art_id, {})
+        body = scraped.get("body", "")
+
+        if ai_result:
+            if publishers is None:
+                _db = get_db()
+                publishers = [r["name"] for r in _db.execute("SELECT name FROM sites").fetchall()]
+                _db.close()
+            def _strip(val):
+                items = [x.strip() for x in (val or "").split(",")]
+                return ", ".join(x for x in items if x and not any(p.lower() in x.lower() for p in publishers))
+            new_prop  = _strip(ai_result.get("company_property", ""))
+            new_brand = _strip(ai_result.get("company_brand", ""))
+            new_agency= _strip(ai_result.get("company_agency", ""))
+            new_sum   = ai_result.get("summary", "") or ""
+            ai_sent   = (ai_result.get("sentiment") or "").strip().lower()
+            new_sent  = ai_sent if ai_sent in ("positive", "negative", "neutral") \
+                        else analyze_sentiment_local(art.get("title",""), new_sum, body)
+        else:
+            new_prop  = art.get("company_property", "") or ""
+            new_brand = art.get("company_brand", "")    or ""
+            new_agency= art.get("company_agency", "")   or ""
+            new_sum   = art.get("summary", "")          or ""
+            new_sent  = analyze_sentiment_local(art.get("title",""), new_sum, body)
+
+        images = scraped.get("images", [])
+        videos = scraped.get("videos", [])
+        _db = get_db()
+        _db.execute("""UPDATE articles SET body=?, company_property=?, company_brand=?,
+                       company_agency=?, summary=?, images=?, videos=?, sentiment=? WHERE id=?""",
+                    (body, new_prop, new_brand, new_agency, new_sum,
+                     json.dumps(images), json.dumps(videos), new_sent, art_id))
+        _db.commit(); _db.close()
+
+        # Background media download
+        site_id = scraped.get("site_id") or art.get("site_id")
+        if (images or videos) and site_id:
+            def _bg():
+                li = _download_media(images, site_id, art_id, "img")
+                lv = _download_media(videos, site_id, art_id, "vid")
+                if li or lv:
+                    try:
+                        _d = get_db()
+                        _d.execute("UPDATE articles SET local_images=?, local_videos=? WHERE id=?",
+                                   (json.dumps(li), json.dumps(lv), art_id))
+                        _d.commit(); _d.close()
+                    except Exception: pass
+            threading.Thread(target=_bg, daemon=True).start()
+
+        return {"ok": True, "id": art_id,
+                "company_property": new_prop, "company_brand": new_brand,
+                "company_agency": new_agency, "summary": new_sum,
+                "sentiment": new_sent, "has_body": bool(body),
+                "body_preview": body[:400] if body else "",
+                "images_count": len(images), "videos_count": len(videos)}
+
+    async def event_stream():
+        total   = len(ids)
+        done    = 0
+        batches = [ids[i:i+batch_size] for i in range(0, len(ids), batch_size)]
+
+        for batch in batches:
+            # ── Phase 1: parallel scrape ──────────────────────────────────────
+            loop      = asyncio.get_event_loop()
+            futures   = [loop.run_in_executor(None, _scrape_one, aid) for aid in batch]
+            scraped_list = await asyncio.gather(*futures)
+            scraped_ok   = [s for s in scraped_list if s.get("ok")]
+            scraped_fail = [s for s in scraped_list if not s.get("ok")]
+
+            # ── Phase 2: batch AI ─────────────────────────────────────────────
+            ai_results: dict[int, dict] = {}
+            if scraped_ok:
+                ai_results = await loop.run_in_executor(None, enrich_with_ai_batch, scraped_ok)
+
+            # ── Phase 3: save + stream results ───────────────────────────────
+            for s in scraped_ok:
+                ai  = ai_results.get(s["id"], {})
+                res = await loop.run_in_executor(None, _save_and_build_result, s["id"], s, ai)
+                done += 1
+                res["done"]  = done
+                res["total"] = total
+                yield f"data: {json.dumps(res)}\n\n"
+
+            for s in scraped_fail:
+                done += 1
+                yield f"data: {json.dumps({'ok': False, 'id': s['id'], 'error': s.get('error',''), 'done': done, 'total': total})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'done': done, 'total': total})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @app.post("/articles/{article_id}/sentiment")
 def article_sentiment(article_id: int):
     """Compute sentiment for a single article using local keyword analysis (instant, no AI quota)."""
@@ -2594,18 +2912,24 @@ async def log_email(subject: str = Form(""), recipients: str = Form(""),
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     db = get_db()
+    today_s = date.today().isoformat()
     sites = db.execute("""
         SELECT s.*,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id) AS total_count,
-            (SELECT COUNT(*) FROM articles WHERE site_id=s.id AND scrape_date=date('now')) AS today_count,
-            (SELECT monthly_visits FROM site_traffic
-             WHERE site_id=s.id AND monthly_visits>0
-             ORDER BY measured_at DESC LIMIT 1) AS latest_visits,
-            (SELECT source FROM site_traffic
-             WHERE site_id=s.id AND monthly_visits>0
-             ORDER BY measured_at DESC LIMIT 1) AS latest_source
-        FROM sites s ORDER BY s.name
-    """).fetchall()
+               COALESCE(tt.c, 0) AS total_count,
+               COALESCE(td.c, 0) AS today_count,
+               st.monthly_visits  AS latest_visits,
+               st.source          AS latest_source
+        FROM sites s
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles GROUP BY site_id) tt ON tt.site_id=s.id
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles WHERE scrape_date=? GROUP BY site_id) td ON td.site_id=s.id
+        LEFT JOIN (
+            SELECT t.site_id, t.monthly_visits, t.source
+            FROM site_traffic t
+            JOIN (SELECT site_id, MAX(measured_at) AS ma FROM site_traffic WHERE monthly_visits>0 GROUP BY site_id) m
+                 ON t.site_id=m.site_id AND t.measured_at=m.ma
+        ) st ON st.site_id=s.id
+        ORDER BY s.name
+    """, (today_s,)).fetchall()
     db.close()
     # Mask stored keys for display (show last 4 chars only)
     def _mask(key: str) -> str:
@@ -3112,33 +3436,202 @@ def export_sites_excel():
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    wb, *styles = _xl_workbook()
-    _, PatternFill, Font, Alignment, Border, Side, get_column_letter = (
-        openpyxl, PatternFill, Font, Alignment, Border, Side, get_column_letter)
+    wb, *_ = _xl_workbook()
 
-    _xl_cover_sheet(wb, "Informe de Sitios Web", "Listado completo · métricas de tráfico y cobertura",
+    _xl_cover_sheet(wb, "Informe de Medios", "Listado completo · métricas de tráfico, cobertura y scraping",
                     PatternFill, Font, Alignment, get_column_letter)
 
-    db   = get_db()
+    db    = get_db()
     today = date.today().isoformat()
     sites = db.execute("""
         SELECT s.*,
-               COALESCE((SELECT monthly_visits FROM site_traffic
-                          WHERE site_id=s.id ORDER BY measured_at DESC LIMIT 1),
-                         s.monthly_visits_manual, 0) AS visits,
-               (SELECT COUNT(*) FROM articles WHERE site_id=s.id AND scrape_date=?) AS today_c,
-               (SELECT COUNT(*) FROM articles WHERE site_id=s.id) AS total_c
-        FROM sites s ORDER BY s.name
+               COALESCE(st.monthly_visits, s.monthly_visits_manual, 0) AS visits,
+               COALESCE(st.source, '')       AS traffic_source,
+               COALESCE(st.bounce_rate, 0)   AS bounce_rate,
+               COALESCE(st.pages_per_visit, 0) AS pages_per_visit,
+               COALESCE(st.global_rank, 0)   AS global_rank,
+               COALESCE(st.country_rank, 0)  AS country_rank,
+               COALESCE(td.c, 0) AS today_c,
+               COALESCE(tt.c, 0) AS total_c
+        FROM sites s
+        LEFT JOIN (SELECT t.site_id, t.monthly_visits, t.source, t.bounce_rate,
+                          t.pages_per_visit, t.global_rank, t.country_rank
+                   FROM site_traffic t
+                   JOIN (SELECT site_id, MAX(measured_at) AS ma FROM site_traffic
+                         WHERE monthly_visits>0 GROUP BY site_id) m
+                        ON t.site_id=m.site_id AND t.measured_at=m.ma) st ON st.site_id=s.id
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles WHERE scrape_date=? GROUP BY site_id) td ON td.site_id=s.id
+        LEFT JOIN (SELECT site_id, COUNT(*) AS c FROM articles GROUP BY site_id) tt ON tt.site_id=s.id
+        ORDER BY s.name
     """, (today,)).fetchall()
     db.close()
 
-    ws = wb.create_sheet("Sitios")
+    # ── Sheet 1: Resumen ──────────────────────────────────────────────────────
+    ws_sum = wb.create_sheet("Resumen")
+    ws_sum.sheet_view.showGridLines = False
+
+    active_sites  = [s for s in sites if s["active"]]
+    total_visits  = sum(s["visits"] or 0 for s in sites)
+    total_arts    = sum(s["total_c"] for s in sites)
+    today_arts    = sum(s["today_c"] for s in sites)
+    with_traffic  = sum(1 for s in sites if (s["visits"] or 0) > 0)
+
+    # KPI cards
+    kpis = [
+        ("Medios totales",         len(sites),        None),
+        ("Medios activos",         len(active_sites),  "16A34A"),
+        ("Con datos de tráfico",   with_traffic,       None),
+        ("Visitas/mes totales",    total_visits,       "2563EB"),
+        ("Artículos totales",      total_arts,         None),
+        ("Artículos hoy",          today_arts,         "0D9488"),
+    ]
+    ws_sum.column_dimensions["A"].width = 3
+    ws_sum.column_dimensions["B"].width = 28
+    ws_sum.column_dimensions["C"].width = 20
+    ws_sum.column_dimensions["D"].width = 3
+    ws_sum.column_dimensions["E"].width = 28
+    ws_sum.column_dimensions["F"].width = 20
+
+    ws_sum.merge_cells("B2:F2")
+    ws_sum["B2"].value = "RESUMEN DE MEDIOS"
+    ws_sum["B2"].fill  = PatternFill("solid", fgColor=HEADER_COLOR)
+    ws_sum["B2"].font  = Font(name=REPORT_FONT, bold=True, color="FFFFFF", size=14)
+    ws_sum["B2"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws_sum.row_dimensions[2].height = 36
+
+    for i, (label, value, color) in enumerate(kpis):
+        row = 4 + (i // 2) * 3
+        col_l = "B" if i % 2 == 0 else "E"
+        col_v = "C" if i % 2 == 0 else "F"
+        ws_sum[f"{col_l}{row}"].value = label
+        ws_sum[f"{col_l}{row}"].font  = Font(name=REPORT_FONT, color="6B7280", size=9)
+        ws_sum[f"{col_l}{row}"].fill  = PatternFill("solid", fgColor=ALT_FILL)
+        ws_sum[f"{col_l}{row+1}"].value = value
+        ws_sum[f"{col_l}{row+1}"].font  = Font(name=REPORT_FONT, bold=True,
+                                               color=color or HEADER_COLOR, size=18)
+        ws_sum[f"{col_l}{row+1}"].number_format = "#,##0"
+        ws_sum[f"{col_l}{row+1}"].fill = PatternFill("solid", fgColor=ALT_FILL)
+        ws_sum[f"{col_v}{row}"].fill   = PatternFill("solid", fgColor=ALT_FILL)
+        ws_sum[f"{col_v}{row+1}"].fill = PatternFill("solid", fgColor=ALT_FILL)
+        ws_sum.row_dimensions[row].height   = 16
+        ws_sum.row_dimensions[row+1].height = 28
+
+    # By country table
+    country_map: dict = {}
+    for s in sites:
+        code = s["country"] or "WW"
+        name, flag = COUNTRY_BY_CODE.get(code, (code, ""))
+        e = country_map.setdefault(code, {"name": f"{flag} {name}".strip(), "total": 0,
+                                          "active": 0, "visits": 0, "arts": 0})
+        e["total"]  += 1
+        if s["active"]: e["active"] += 1
+        e["visits"] += s["visits"] or 0
+        e["arts"]   += s["total_c"]
+    by_country = sorted(country_map.values(), key=lambda x: x["visits"], reverse=True)
+
+    start_row = 4 + ((len(kpis) + 1) // 2) * 3 + 2
+    ws_sum.merge_cells(f"B{start_row}:F{start_row}")
+    ws_sum[f"B{start_row}"].value = "Por país"
+    ws_sum[f"B{start_row}"].fill  = PatternFill("solid", fgColor=BRAND_COLOR)
+    ws_sum[f"B{start_row}"].font  = Font(name=REPORT_FONT, bold=True, color="FFFFFF", size=10)
+    ws_sum[f"B{start_row}"].alignment = Alignment(horizontal="left", vertical="center", indent=2)
+    ws_sum.row_dimensions[start_row].height = 22
+
+    ch_headers = ["País", "Medios", "Activos", "Visitas/Mes", "Artículos"]
+    ch_cols    = ["B", "C", "D", "E", "F"]
+    for col, hdr in zip(ch_cols, ch_headers):
+        cell = ws_sum[f"{col}{start_row+1}"]
+        cell.value = hdr
+        cell.fill  = PatternFill("solid", fgColor=SUBH_COLOR)
+        cell.font  = Font(name=REPORT_FONT, bold=True, color="FFFFFF", size=9)
+        cell.alignment = Alignment(horizontal="center" if hdr != "País" else "left",
+                                   vertical="center", indent=1 if hdr == "País" else 0)
+    ws_sum.row_dimensions[start_row+1].height = 20
+
+    for i, cr in enumerate(by_country):
+        r  = start_row + 2 + i
+        ev = i % 2 == 0
+        fill = PatternFill("solid", fgColor=ALT_FILL if ev else "FFFFFF")
+        for col in ch_cols:
+            ws_sum[f"{col}{r}"].fill = fill
+            ws_sum[f"{col}{r}"].font = Font(name=REPORT_FONT, size=9)
+        ws_sum[f"B{r}"].value = cr["name"]
+        ws_sum[f"C{r}"].value = cr["total"];  ws_sum[f"C{r}"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_sum[f"D{r}"].value = cr["active"]; ws_sum[f"D{r}"].alignment = Alignment(horizontal="center", vertical="center")
+        ws_sum[f"E{r}"].value = cr["visits"]; ws_sum[f"E{r}"].number_format = "#,##0"
+        ws_sum[f"F{r}"].value = cr["arts"];   ws_sum[f"F{r}"].number_format = "#,##0"
+        ws_sum.row_dimensions[r].height = 17
+
+    # By category table (to the right)
+    cat_map: dict = {}
+    for s in sites:
+        cat = s["category"] or "(sin categoría)"
+        e = cat_map.setdefault(cat, {"total": 0, "active": 0, "visits": 0})
+        e["total"] += 1
+        if s["active"]: e["active"] += 1
+        e["visits"] += s["visits"] or 0
+    by_cat = sorted(cat_map.values(), key=lambda x: x["visits"], reverse=True)
+
+    cat_col_start = 8  # column H
+    ws_sum.column_dimensions[get_column_letter(cat_col_start)].width = 3
+    ws_sum.column_dimensions[get_column_letter(cat_col_start+1)].width = 26
+    ws_sum.column_dimensions[get_column_letter(cat_col_start+2)].width = 12
+    ws_sum.column_dimensions[get_column_letter(cat_col_start+3)].width = 18
+
+    cat_start_row = start_row
+    ws_sum.merge_cells(start_row=cat_start_row, start_column=cat_col_start+1,
+                       end_row=cat_start_row, end_column=cat_col_start+3)
+    cell = ws_sum.cell(row=cat_start_row, column=cat_col_start+1, value="Por categoría")
+    cell.fill = PatternFill("solid", fgColor=BRAND_COLOR)
+    cell.font = Font(name=REPORT_FONT, bold=True, color="FFFFFF", size=10)
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=2)
+
+    for j, (ch, off) in enumerate([("Categoría",0),("Medios",1),("Visitas/Mes",2)]):
+        cell = ws_sum.cell(row=cat_start_row+1, column=cat_col_start+1+j, value=ch)
+        cell.fill = PatternFill("solid", fgColor=SUBH_COLOR)
+        cell.font = Font(name=REPORT_FONT, bold=True, color="FFFFFF", size=9)
+        cell.alignment = Alignment(horizontal="center" if j>0 else "left",
+                                   vertical="center", indent=1 if j==0 else 0)
+
+    for i, cr in enumerate(by_cat):
+        r  = cat_start_row + 2 + i
+        ev = i % 2 == 0
+        fill = PatternFill("solid", fgColor=ALT_FILL if ev else "FFFFFF")
+        for off in range(3):
+            c = ws_sum.cell(row=r, column=cat_col_start+1+off)
+            c.fill = fill; c.font = Font(name=REPORT_FONT, size=9)
+        name_key = [k for k,v in cat_map.items() if v is cr]
+        ws_sum.cell(row=r, column=cat_col_start+1).value = name_key[0] if name_key else ""
+        ws_sum.cell(row=r, column=cat_col_start+2).value = cr["total"]
+        ws_sum.cell(row=r, column=cat_col_start+2).alignment = Alignment(horizontal="center", vertical="center")
+        ws_sum.cell(row=r, column=cat_col_start+3).value = cr["visits"]
+        ws_sum.cell(row=r, column=cat_col_start+3).number_format = "#,##0"
+        ws_sum.row_dimensions[r].height = 17
+
+    # ── Sheet 2: Listado completo ─────────────────────────────────────────────
+    ws = wb.create_sheet("Medios")
     ws.sheet_view.showGridLines = False
 
-    headers = ["Nombre", "URL", "País", "Categoría", "Activo", "Stealth",
-               "Artículos Hoy", "Artículos Total", "Visitas/Mes",
-               "Último Scrape", "Resultado", "Error"]
-    widths  = [28, 40, 14, 18, 9, 9, 13, 13, 16, 22, 14, 35]
+    headers = [
+        "Nombre", "URL", "País", "Categoría",
+        "Activo", "Stealth", "CDP",
+        "Artículos Hoy", "Artículos Total",
+        "Visitas/Mes", "Fuente tráfico", "Bounce Rate", "Páginas/Visita",
+        "Rank Global", "Rank País",
+        "Frecuencia Scrape", "Auto-Enrich", "Frecuencia Tráfico",
+        "Último Scrape", "Estado", "Nuevos último scrape", "Error",
+        "CSS Selector", "URL Pattern",
+    ]
+    widths = [
+        30, 42, 12, 18,
+        8, 8, 8,
+        12, 12,
+        16, 14, 12, 14,
+        14, 12,
+        16, 12, 18,
+        20, 12, 18, 40,
+        22, 22,
+    ]
 
     for i, (h, w) in enumerate(zip(headers, widths), 1):
         ws.column_dimensions[get_column_letter(i)].width = w
@@ -3147,37 +3640,70 @@ def export_sites_excel():
     _style_header_row(ws, 1, len(headers), PatternFill, Font, Alignment, Border, Side)
     ws.freeze_panes = "A2"
 
+    FREQ_LABELS = {0: "Manual", 1: "Cada día", 2: "Cada 2 días", 3: "Cada 3 días",
+                   7: "Semanal", 14: "Quincenal", 30: "Mensual"}
+
     for r, s in enumerate(sites, 2):
         even = r % 2 == 0
         _style_data_row(ws, r, len(headers), PatternFill, Font, Alignment, even)
-        ws.row_dimensions[r].height = 18
+        ws.row_dimensions[r].height = 17
+
+        freq  = s["scrape_frequency_days"] or 0
+        freq_label = FREQ_LABELS.get(freq, f"Cada {freq} días" if freq else "Manual")
+        tfreq = s["traffic_frequency_days"] or 5
+        tfreq_label = f"Cada {tfreq} días"
+
         vals = [
             s["name"], s["url"],
             s["country"] or "WW", s["category"] or "",
             "Sí" if s["active"] else "No",
             "Sí" if s["use_stealth"] else "No",
+            "Sí" if (s["cdp_url"] or "").strip() else "No",
             s["today_c"], s["total_c"],
             s["visits"] or 0,
+            s["traffic_source"] or "",
+            round(s["bounce_rate"] or 0, 1),
+            round(s["pages_per_visit"] or 0, 2),
+            s["global_rank"] or 0,
+            s["country_rank"] or 0,
+            freq_label,
+            "Sí" if s["auto_enrich"] else "No",
+            tfreq_label,
             (s["last_scraped"] or "")[:16].replace("T", " "),
             s["last_scrape_status"] or "",
+            s["last_scrape_count"] or 0,
             (s["last_scrape_error"] or "")[:120],
+            s["css_selector"] or "",
+            s["article_url_pattern"] or "",
         ]
+
+        bool_cols   = {5, 6, 7, 17}   # 1-indexed: Activo, Stealth, CDP, Auto-Enrich
+        num_cols    = {8, 9, 14, 15, 21}
+        money_cols  = {10}
+
         for c, v in enumerate(vals, 1):
             cell = ws.cell(row=r, column=c, value=v)
-            if c in (7, 8):
+            if c in bool_cols:
+                is_yes = v == "Sí"
+                cell.font = Font(name=REPORT_FONT, size=9,
+                                 color="16A34A" if is_yes else "6B7280", bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif c in num_cols:
                 cell.number_format = "#,##0"
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-            if c == 9:
+            elif c in money_cols:
                 cell.number_format = "#,##0"
                 cell.alignment = Alignment(horizontal="right", vertical="center")
-            if c == 5:
-                cell.font = Font(name=REPORT_FONT, size=9,
-                                 color="16A34A" if v == "Sí" else "6B7280", bold=True)
+            elif c == 20:  # status
+                status_colors = {"ok": "16A34A", "error": "DC2626", "empty": "D97706"}
+                color = status_colors.get(v, "6B7280")
+                cell.font = Font(name=REPORT_FONT, size=9, color=color, bold=bool(v))
+                cell.alignment = Alignment(horizontal="center", vertical="center")
 
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f"sports_intel_sitios_{date.today().isoformat()}.xlsx"
+    fname = f"sports_intel_medios_{date.today().isoformat()}.xlsx"
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 

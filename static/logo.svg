@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
+  <defs>
+    <linearGradient id="teal1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9ECFC8"/>
+      <stop offset="100%" stop-color="#7DB8B2"/>
+    </linearGradient>
+    <linearGradient id="coral1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E8785A"/>
+      <stop offset="100%" stop-color="#D4573C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Layer 1 — outer teal arc: from ~1 o'clock CCW through top+left to ~7 o'clock -->
+  <!-- 1 o'clock = 30°: x=150+120*sin30=210, y=150-120*cos30=46 -->
+  <!-- 7 o'clock = 210°: x=150+120*sin210=90, y=150-120*cos210=254 -->
+  <path d="M 210 46 A 120 120 0 0 0 90 254"
+        fill="none" stroke="url(#teal1)" stroke-width="58" stroke-linecap="round" opacity="0.82"/>
+
+  <!-- Layer 2 — outer coral arc: from 12 o'clock CW through right+bottom to ~8 o'clock -->
+  <!-- 12 o'clock: x=150, y=30 -->
+  <!-- 8 o'clock = 240°: x=150+120*sin240=46, y=150-120*cos240=210 -->
+  <path d="M 150 30 A 120 120 0 1 1 46 210"
+        fill="none" stroke="url(#coral1)" stroke-width="56" stroke-linecap="round" opacity="0.88"/>
+
+  <!-- Layer 3 — medium teal arc (inner, from ~11 o'clock CCW to ~6 o'clock) -->
+  <!-- 11 o'clock = 330°: x=150+78*sin330=111, y=150-78*cos330=82 -->
+  <!-- 6 o'clock = 180°: x=150, y=228 -->
+  <path d="M 111 82 A 78 78 0 0 0 150 228"
+        fill="none" stroke="url(#teal1)" stroke-width="38" stroke-linecap="round" opacity="0.72"/>
+
+  <!-- Layer 4 — medium coral arc (inner, from ~12 o'clock CW to ~7 o'clock) -->
+  <!-- 12 o'clock inner: x=150, y=72 -->
+  <!-- 7 o'clock = 210°: x=150+78*sin210=111, y=150-78*cos210=218 (but use 72 radius) -->
+  <path d="M 150 72 A 78 78 0 1 1 111 218"
+        fill="none" stroke="url(#coral1)" stroke-width="36" stroke-linecap="round" opacity="0.80"/>
+
+  <!-- Layer 5 — innermost coral hook/tail: small curl at bottom-right -->
+  <!-- Starts around 1 o'clock inner (small R=38) and curls around CW ending with tail -->
+  <!-- 1 o'clock R=38: x=150+38*sin30=169, y=150-38*cos30=117 -->
+  <!-- Tail end curves toward bottom-right -->
+  <path d="M 169 117 A 38 38 0 1 1 145 190 Q 155 220 175 215"
+        fill="none" stroke="#E0624A" stroke-width="18" stroke-linecap="round" opacity="0.92"/>
+</svg>

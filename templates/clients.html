@@ -11,40 +11,36 @@
 {% endblock %}
 
 {% block content %}
+<style>
+.skeleton { background: linear-gradient(90deg,#f3f4f6 25%,#e9eaec 50%,#f3f4f6 75%); background-size:200% 100%; animation: shimmer 1.2s infinite; border-radius:6px; display:inline-block; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
 
-<!-- Stats cards -->
+<!-- Stats cards — totals filled async -->
 <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:18px">
   <div class="stat-card">
     <div class="stat-label">Clientes</div>
-    <div class="stat-value">{{ totals.clients }}</div>
-    <div style="font-size:11px;color:#9ca3af">{{ totals.brands }} marcas en total</div>
+    <div class="stat-value">{{ clients|length }}</div>
+    <div id="kpi-brands" style="font-size:11px;color:#9ca3af"><span class="skeleton" style="width:80px;height:11px">&nbsp;</span></div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Universo (30d)</div>
-    <div class="stat-value" style="color:#d97706">{{ "{:,}".format(totals.universe).replace(",", ".") }}</div>
+    <div class="stat-value" style="color:#d97706" id="kpi-universe"><span class="skeleton" style="width:60px;height:24px">&nbsp;</span></div>
     <div style="font-size:11px;color:#9ca3af">noticias del cliente</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Menciones marca (30d)</div>
-    <div class="stat-value" style="color:#0d9488">{{ "{:,}".format(totals.mentions).replace(",", ".") }}</div>
+    <div class="stat-value" style="color:#0d9488" id="kpi-mentions"><span class="skeleton" style="width:60px;height:24px">&nbsp;</span></div>
     <div style="font-size:11px;color:#9ca3af">dentro del universo</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">OTS marcas (30d)</div>
-    <div class="stat-value" style="color:#2563eb">
-      {% if totals.ots >= 1000000 %}{{ "%.1f"|format(totals.ots/1000000) }}M
-      {% elif totals.ots >= 1000 %}{{ "%.0f"|format(totals.ots/1000) }}K
-      {% else %}{{ totals.ots }}{% endif %}
-    </div>
+    <div class="stat-value" style="color:#2563eb" id="kpi-ots"><span class="skeleton" style="width:60px;height:24px">&nbsp;</span></div>
     <div style="font-size:11px;color:#9ca3af">impresiones potenciales</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">VPE marcas (30d)</div>
-    <div class="stat-value" style="color:#7c3aed">
-      {% if totals.vpe >= 1000000 %}{{ "%.1f"|format(totals.vpe/1000000) }}M€
-      {% elif totals.vpe >= 1000 %}{{ "%.0f"|format(totals.vpe/1000) }}K€
-      {% else %}{{ "%.0f"|format(totals.vpe) }}€{% endif %}
-    </div>
+    <div class="stat-value" style="color:#7c3aed" id="kpi-vpe"><span class="skeleton" style="width:60px;height:24px">&nbsp;</span></div>
     <div style="font-size:11px;color:#9ca3af">€ publicidad equivalente</div>
   </div>
 </div>
@@ -63,30 +59,18 @@
         <th style="width:130px;text-align:center">Acciones</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="clients-tbody">
       {% for c in clients %}
-      <tr style="border-top:1px solid #f3f4f6">
+      <tr id="client-row-{{ c.id }}" style="border-top:1px solid #f3f4f6">
         <td>
           <a href="/clients/{{ c.id }}" style="font-size:14px;font-weight:600;color:#111827;text-decoration:none">{{ c.name }}</a>
           {% if c.notes %}<div style="font-size:11px;color:#9ca3af;margin-top:2px">{{ c.notes[:80] }}</div>{% endif %}
         </td>
-        <td style="text-align:center;font-weight:500;color:#d97706">
-          {{ c.search_count }}
-        </td>
-        <td style="text-align:center">
-          <span class="badge badge-slate">{{ c.brand_count }}</span>
-        </td>
-        <td style="text-align:center;font-weight:500;color:#0d9488">{{ "{:,}".format(c.impact.total).replace(",", ".") }}</td>
-        <td style="text-align:center;font-weight:500;color:#2563eb">
-          {% if c.impact.ots >= 1000000 %}{{ "%.1f"|format(c.impact.ots/1000000) }}M
-          {% elif c.impact.ots >= 1000 %}{{ "%.0f"|format(c.impact.ots/1000) }}K
-          {% else %}{{ c.impact.ots }}{% endif %}
-        </td>
-        <td style="text-align:center;font-weight:500;color:#7c3aed">
-          {% if c.impact.vpe >= 1000000 %}{{ "%.1f"|format(c.impact.vpe/1000000) }}M€
-          {% elif c.impact.vpe >= 1000 %}{{ "%.1f"|format(c.impact.vpe/1000) }}K€
-          {% else %}{{ "%.0f"|format(c.impact.vpe) }}€{% endif %}
-        </td>
+        <td style="text-align:center;font-weight:500;color:#d97706">{{ c.search_count }}</td>
+        <td style="text-align:center"><span class="badge badge-slate">{{ c.brand_count }}</span></td>
+        <td class="kpi-cell" style="text-align:center;font-weight:500;color:#0d9488"><span class="skeleton" style="width:40px;height:14px">&nbsp;</span></td>
+        <td class="kpi-cell" style="text-align:center;font-weight:500;color:#2563eb"><span class="skeleton" style="width:40px;height:14px">&nbsp;</span></td>
+        <td class="kpi-cell" style="text-align:center;font-weight:500;color:#7c3aed"><span class="skeleton" style="width:40px;height:14px">&nbsp;</span></td>
         <td style="text-align:center">
           <a href="/clients/{{ c.id }}" class="btn-ghost btn-sm">Ver</a>
           <form method="post" action="/clients/{{ c.id }}/delete" style="display:inline"
@@ -131,4 +115,41 @@
     </form>
   </div>
 </div>
+
+<script>
+function fmtBig(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1).replace('.',',') + 'M';
+  if (n >= 1e3) return Math.round(n/1e3).toLocaleString('es-ES') + 'K';
+  return n.toLocaleString('es-ES');
+}
+
+async function loadClientKpis() {
+  try {
+    const res  = await fetch('/clients/widgets');
+    const data = await res.json();
+    const t    = data.totals;
+
+    // Update stat cards
+    document.getElementById('kpi-universe').textContent  = fmtBig(t.universe);
+    document.getElementById('kpi-mentions').textContent  = fmtBig(t.mentions);
+    document.getElementById('kpi-ots').textContent       = fmtBig(t.ots);
+    document.getElementById('kpi-vpe').textContent       = fmtBig(t.vpe) + '€';
+    document.getElementById('kpi-brands').textContent    = '— marcas en total';
+
+    // Update per-row KPI cells
+    for (const c of data.clients) {
+      const row = document.getElementById('client-row-' + c.id);
+      if (!row) continue;
+      const cells = row.querySelectorAll('.kpi-cell');
+      cells[0].textContent = fmtBig(c.impact.total);
+      cells[1].textContent = fmtBig(c.impact.ots);
+      cells[2].textContent = fmtBig(c.impact.vpe) + '€';
+    }
+  } catch(e) {
+    console.error('Error loading client KPIs', e);
+  }
+}
+
+loadClientKpis();
+</script>
 {% endblock %}

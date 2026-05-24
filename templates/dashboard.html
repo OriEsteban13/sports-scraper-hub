@@ -22,6 +22,11 @@
 <script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
 
+<style>
+.skeleton { background: linear-gradient(90deg,#f3f4f6 25%,#e9eaec 50%,#f3f4f6 75%); background-size:200% 100%; animation: shimmer 1.2s infinite; border-radius:6px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
+
 <!-- Search bar -->
 <form method="get" action="/news" class="card" style="padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:10px">
   <svg style="width:18px;height:18px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -132,100 +137,23 @@
   </div>
 </div>
 
-<script>
-(function initWorldMap(){
-  const data = {{ country_dist | tojson }};
-  // Map data: skip "WW" (global) on the geographic map; show in list only
-  const values = {};
-  data.forEach(d => { if (d.code !== 'WW') values[d.code] = d.count; });
-  const lookup = Object.fromEntries(data.map(d => [d.code, d]));
-
-  if (typeof jsVectorMap === 'undefined') {
-    document.getElementById('worldMap').innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:12px">Mapa no disponible (sin conexión a CDN)</div>';
-    return;
-  }
-
-  new jsVectorMap({
-    selector: '#worldMap',
-    map: 'world',
-    backgroundColor: 'transparent',
-    zoomButtons: true,
-    regionStyle: {
-      initial:  { fill: '#f3f4f6', stroke: '#e5e7eb', strokeWidth: 0.5 },
-      hover:    { fill: '#5eead4', cursor: 'pointer' },
-      selected: { fill: '#0d9488' },
-    },
-    series: {
-      regions: [{
-        attribute: 'fill',
-        scale: ['#cdf6ed', '#0d9488'],
-        normalizeFunction: 'polynomial',
-        values: values,
-      }]
-    },
-    onRegionTooltipShow(event, tooltip, code) {
-      const d = lookup[code];
-      const country = (d && d.name) ? `${d.flag} ${d.name}` : code;
-      const count = (d && d.count) ? d.count : 0;
-      tooltip.text(`${country}: <b>${count}</b> artículos${d && d.sites ? ' · ' + d.sites + ' medios' : ''}`, true);
-    }
-  });
-})();
-</script>
-
-<!-- Clients -->
-<div class="card" style="overflow:hidden;margin-bottom:20px">
+<!-- Clients — loaded async -->
+<div class="card" style="overflow:hidden;margin-bottom:20px" id="clients-card">
   <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between">
     <div>
       <span style="font-size:13px;font-weight:600;color:#111827">Clientes</span>
-      <span style="font-size:11px;color:#9ca3af;margin-left:8px">{{ dashboard_clients|length }} activos</span>
+      <span id="clients-count" style="font-size:11px;color:#9ca3af;margin-left:8px">cargando...</span>
     </div>
     <a href="/clients" style="font-size:12px;color:#14b8a6;text-decoration:none">Gestionar →</a>
   </div>
-  {% if dashboard_clients %}
-  <table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
-      <tr>
-        <th style="padding:10px 18px;text-align:left">Cliente</th>
-        <th style="padding:10px;text-align:center;width:80px">Búsquedas</th>
-        <th style="padding:10px;text-align:center;width:80px">Marcas</th>
-        <th style="padding:10px;text-align:center;width:100px">Menciones 30d</th>
-        <th style="padding:10px;text-align:center;width:100px">OTS 30d</th>
-        <th style="padding:10px 18px;text-align:center;width:100px">VPE 30d</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in dashboard_clients %}
-      <tr style="border-top:1px solid #f3f4f6">
-        <td style="padding:10px 18px">
-          <a href="/clients/{{ c.id }}" style="font-weight:600;color:#111827;text-decoration:none;font-size:13px">{{ c.name }}</a>
-          {% if c.notes %}<div style="font-size:10px;color:#9ca3af;margin-top:1px">{{ c.notes[:60] }}</div>{% endif %}
-        </td>
-        <td style="padding:10px;text-align:center;color:#d97706;font-weight:500">{{ c.search_count }}</td>
-        <td style="padding:10px;text-align:center">
-          <span class="badge badge-slate">{{ c.brand_count }}</span>
-        </td>
-        <td style="padding:10px;text-align:center;font-weight:600;color:#0d9488">{{ c.impact.total | fmtnum }}</td>
-        <td style="padding:10px;text-align:center;font-weight:600;color:#2563eb">
-          {% if c.impact.ots >= 1000000 %}{{ "%.1f"|format(c.impact.ots/1000000)|replace(".",",") }}M
-          {% elif c.impact.ots >= 1000 %}{{ "%.0f"|format(c.impact.ots/1000) }}K
-          {% else %}{{ c.impact.ots | fmtnum }}{% endif %}
-        </td>
-        <td style="padding:10px 18px;text-align:center;font-weight:600;color:#7c3aed">
-          {% if c.impact.vpe >= 1000000 %}{{ "%.1f"|format(c.impact.vpe/1000000)|replace(".",",") }}M€
-          {% elif c.impact.vpe >= 1000 %}{{ "%.1f"|format(c.impact.vpe/1000)|replace(".",",") }}K€
-          {% else %}{{ c.impact.vpe | fmtnum }}€{% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">
-    Sin clientes todavía. <a href="/clients" style="color:#14b8a6">Crear cliente →</a>
+  <div id="clients-body">
+    <!-- skeleton -->
+    <div style="padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+      <div class="skeleton" style="height:14px;width:60%"></div>
+      <div class="skeleton" style="height:14px;width:45%"></div>
+      <div class="skeleton" style="height:14px;width:70%"></div>
+    </div>
   </div>
-  {% endif %}
 </div>
 
 <!-- Two columns: sites & recent articles -->
@@ -312,7 +240,7 @@
 </div>
 
 <script>
-// Global daily evolution chart
+// ── Charts & Map ───────────────────────────────────────────────────────────────
 const dailyData = {{ daily_series | tojson }};
 new Chart(document.getElementById('globalChart').getContext('2d'), {
   type: 'line',
@@ -323,22 +251,103 @@ new Chart(document.getElementById('globalChart').getContext('2d'), {
       data: dailyData.map(d => d.count),
       borderColor: '#0d9488',
       backgroundColor: 'rgba(20,184,166,.1)',
-      fill: true,
-      tension: 0.3,
-      pointRadius: 2,
-      pointHoverRadius: 5,
+      fill: true, tension: 0.3, pointRadius: 2, pointHoverRadius: 5,
     }]
   },
   options: {
     responsive: true, maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      y: { beginAtZero: true, ticks: { font: { size: 10 }, color: '#9ca3af' }, grid: { color: '#f3f4f6' } },
-      x: { ticks: { font: { size: 10 }, color: '#9ca3af', maxRotation: 0 }, grid: { display: false } }
+      y: { beginAtZero: true, ticks: { font:{size:10}, color:'#9ca3af' }, grid:{color:'#f3f4f6'} },
+      x: { ticks: { font:{size:10}, color:'#9ca3af', maxRotation:0 }, grid:{display:false} }
     }
   }
 });
 
+(function initWorldMap(){
+  const data = {{ country_dist | tojson }};
+  const values = {};
+  data.forEach(d => { if (d.code !== 'WW') values[d.code] = d.count; });
+  const lookup = Object.fromEntries(data.map(d => [d.code, d]));
+  if (typeof jsVectorMap === 'undefined') {
+    document.getElementById('worldMap').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:12px">Mapa no disponible</div>';
+    return;
+  }
+  new jsVectorMap({
+    selector: '#worldMap', map: 'world', backgroundColor: 'transparent', zoomButtons: true,
+    regionStyle: {
+      initial: { fill:'#f3f4f6', stroke:'#e5e7eb', strokeWidth:0.5 },
+      hover:   { fill:'#5eead4', cursor:'pointer' },
+    },
+    series: { regions: [{ attribute:'fill', scale:['#cdf6ed','#0d9488'], normalizeFunction:'polynomial', values }] },
+    onRegionTooltipShow(event, tooltip, code) {
+      const d = lookup[code];
+      const country = (d && d.name) ? `${d.flag} ${d.name}` : code;
+      const count = (d && d.count) ? d.count : 0;
+      tooltip.text(`${country}: <b>${count}</b> artículos${d&&d.sites?' · '+d.sites+' medios':''}`, true);
+    }
+  });
+})();
+
+// ── Async widgets ──────────────────────────────────────────────────────────────
+function fmtBig(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1).replace('.',',') + 'M';
+  if (n >= 1e3) return Math.round(n/1e3) + 'K';
+  return n.toLocaleString('es-ES');
+}
+
+async function loadWidgets() {
+  try {
+    const res  = await fetch('/dashboard/widgets');
+    const data = await res.json();
+
+    // ── Clients table ───────────────────────────────────────────────────────
+    const clients = data.clients || [];
+    document.getElementById('clients-count').textContent = clients.length + ' activos';
+    if (clients.length === 0) {
+      document.getElementById('clients-body').innerHTML =
+        '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:13px">Sin clientes todavía. <a href="/clients" style="color:#14b8a6">Crear cliente →</a></div>';
+    } else {
+      const rows = clients.map(c => {
+        const otsFmt = fmtBig(c.impact.ots);
+        const vpeFmt = fmtBig(c.impact.vpe);
+        return `<tr style="border-top:1px solid #f3f4f6">
+          <td style="padding:10px 18px">
+            <a href="/clients/${c.id}" style="font-weight:600;color:#111827;text-decoration:none;font-size:13px">${c.name}</a>
+          </td>
+          <td style="padding:10px;text-align:center;color:#d97706;font-weight:500">${c.search_count}</td>
+          <td style="padding:10px;text-align:center"><span class="badge badge-slate">${c.brand_count}</span></td>
+          <td style="padding:10px;text-align:center;font-weight:600;color:#0d9488">${c.impact.total.toLocaleString('es-ES')}</td>
+          <td style="padding:10px;text-align:center;font-weight:600;color:#2563eb">${otsFmt}</td>
+          <td style="padding:10px 18px;text-align:center;font-weight:600;color:#7c3aed">${vpeFmt}€</td>
+        </tr>`;
+      }).join('');
+      document.getElementById('clients-body').innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:#fafafa;border-bottom:1px solid #f3f4f6">
+            <tr>
+              <th style="padding:10px 18px;text-align:left">Cliente</th>
+              <th style="padding:10px;text-align:center;width:80px">Búsquedas</th>
+              <th style="padding:10px;text-align:center;width:80px">Marcas</th>
+              <th style="padding:10px;text-align:center;width:100px">Menciones 30d</th>
+              <th style="padding:10px;text-align:center;width:100px">OTS 30d</th>
+              <th style="padding:10px 18px;text-align:center;width:100px">VPE 30d</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+  } catch(e) {
+    document.getElementById('clients-body').innerHTML =
+      '<div style="padding:20px 18px;color:#ef4444;font-size:12px">Error cargando datos</div>';
+  }
+}
+
+// Load widgets after the page is interactive
+loadWidgets();
+
+// ── Save search ────────────────────────────────────────────────────────────────
 async function saveSearch() {
   const name  = document.getElementById('ss_name').value.trim();
   const query = document.getElementById('ss_query').value.trim();
