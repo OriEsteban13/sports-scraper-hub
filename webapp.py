@@ -51,10 +51,18 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-# Scrapling is imported lazily inside _fetch_page() to keep startup RAM low
-# (Playwright/Chromium ~400MB; only load when a scrape is actually triggered)
+# Scrapling imported lazily to keep startup RAM low.
+# On Render (512MB), Playwright/Chromium is not installed —
+# DynamicFetcher/StealthyFetcher are replaced with no-op stubs that return None.
 def _get_fetchers():
-    from scrapling.fetchers import Fetcher, DynamicFetcher, StealthyFetcher
+    from scrapling.fetchers import Fetcher
+    try:
+        from scrapling.fetchers import DynamicFetcher, StealthyFetcher
+    except Exception:
+        class _NoopFetcher:
+            @staticmethod
+            def fetch(*a, **kw): return None
+        DynamicFetcher = StealthyFetcher = _NoopFetcher
     return Fetcher, DynamicFetcher, StealthyFetcher
 
 app = FastAPI(title="Sports Scraper Hub")
