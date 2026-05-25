@@ -148,7 +148,13 @@ class _PgConnection:
         sql = sql.replace("?", "%s")
         sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         sql = sql.replace("(date('now'))", "CURRENT_DATE")
-        sql = sql.replace("date('now')", "CURRENT_DATE")
+        # date('now', '-N days/months/years') → CURRENT_DATE - INTERVAL 'N days/months/years'
+        sql = re.sub(
+            r"date\('now'\s*,\s*['\"]([+-]?\d+)\s+(days?|months?|years?)['\"](?:\s*,\s*['\"][^'\"]*['\"])*\)",
+            lambda m: f"(CURRENT_DATE + INTERVAL '{m.group(1)} {m.group(2)}')::text",
+            sql, flags=re.IGNORECASE
+        )
+        sql = sql.replace("date('now')", "CURRENT_DATE::text")
         if "INSERT OR IGNORE INTO" in sql:
             sql = sql.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             sql = sql.rstrip(";").rstrip() + " ON CONFLICT DO NOTHING"
