@@ -500,7 +500,8 @@ function exportMapPDF() {
         <th class="sort-th" data-col="today" style="text-align:center;width:70px">Hoy <span class="sort-icon"></span></th>
         <th class="sort-th" data-col="total" style="text-align:center;width:80px">Total <span class="sort-icon"></span></th>
         <th class="sort-th" data-col="scraped" style="text-align:left;width:130px">Último scrape <span class="sort-icon"></span></th>
-        <th class="sort-th" data-col="result" style="text-align:center;width:110px">Resultado <span class="sort-icon"></span></th>
+        <th class="sort-th" data-col="result" style="text-align:center;width:90px">Resultado <span class="sort-icon"></span></th>
+        <th style="text-align:left;width:180px">Detalle error</th>
         <th class="sort-th" data-col="visits" style="text-align:center;width:100px">Tráfico/mes <span class="sort-icon"></span></th>
         <th style="text-align:center;width:80px">Estado</th>
         <th style="text-align:center;width:100px">Acciones</th>
@@ -553,6 +554,11 @@ function exportMapPDF() {
           {% else %}
             <span class="badge badge-gray">{{ s.last_scrape_status or '—' }}</span>
           {% endif %}
+        </td>
+        <td style="font-size:10px;color:#b91c1c;max-width:180px">
+          {% if s.last_scrape_error %}
+            <span title="{{ s.last_scrape_error }}" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help">{{ s.last_scrape_error[:80] }}</span>
+          {% else %}<span style="color:#d1d5db">—</span>{% endif %}
         </td>
         <td class="traffic-cell" style="text-align:center;font-size:11px;cursor:pointer"
             data-id="{{ s.id }}" data-name="{{ s.name }}" title="Ver evolución de tráfico">
