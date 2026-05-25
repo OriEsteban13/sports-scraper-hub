@@ -51,7 +51,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from scrapling.fetchers import Fetcher, DynamicFetcher, StealthyFetcher
+# Scrapling is imported lazily inside _fetch_page() to keep startup RAM low
+# (Playwright/Chromium ~400MB; only load when a scrape is actually triggered)
+def _get_fetchers():
+    from scrapling.fetchers import Fetcher, DynamicFetcher, StealthyFetcher
+    return Fetcher, DynamicFetcher, StealthyFetcher
 
 app = FastAPI(title="Sports Scraper Hub")
 templates = Jinja2Templates(directory="templates")
@@ -657,6 +661,7 @@ def _fetch_page(url: str, use_stealth: bool, cookies: dict | None = None,
         because heavy sites (WSJ, NYT) keep background XHR alive indefinitely
       - CDP mode uses network_idle because the user's real Chrome is already warmed up
     """
+    Fetcher, DynamicFetcher, StealthyFetcher = _get_fetchers()
     ck = cookies or {}
 
     # CDP mode — connect to user's running Chrome; no bot detection possible
@@ -964,6 +969,7 @@ def _hms_to_sec(s: str) -> int:
 
 def fetch_similarweb_public(domain: str) -> dict:
     """Scrape the Similarweb public page using StealthyFetcher with CF solving."""
+    _, _, StealthyFetcher = _get_fetchers()
     url = f"https://www.similarweb.com/website/{domain}/"
     out = {"source": "similarweb", "error": ""}
     try:
@@ -1001,6 +1007,7 @@ def fetch_similarweb_public(domain: str) -> dict:
 
 def fetch_hypestat_public(domain: str) -> dict:
     """Fallback: hypestat.com aggregates many free traffic estimators."""
+    Fetcher, _, _ = _get_fetchers()
     url = f"https://hypestat.com/info/{domain}"
     try:
         page = Fetcher.get(url, stealthy_headers=True, timeout=30)
