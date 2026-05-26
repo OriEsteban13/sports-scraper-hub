@@ -132,7 +132,8 @@
         Crear Correo
       </button>
       <span style="font-size:12px;color:#9ca3af">
-        {% if search_q %}<b>{{ articles | length }}</b> resultados para «<b>{{ search_q }}</b>»{% else %}{{ articles | length }} artículos{% endif %}
+        {% if search_q %}<b>{{ total_count }}</b> resultados para «<b>{{ search_q }}</b>»{% else %}<b>{{ total_count }}</b> artículos{% endif %}
+        {% if total_pages > 1 %}<span style="color:#9ca3af"> · pág. {{ page }}/{{ total_pages }}</span>{% endif %}
       </span>
     </div>
   </form>
@@ -422,6 +423,19 @@
         {% endfor %}
       </tbody>
     </table>
+
+    {% if total_pages > 1 %}
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:16px 0;border-top:1px solid #f3f4f6">
+      {% set qs_base %}{% if filter_date %}date_filter={{ filter_date }}{% endif %}{% if search_q %}&q={{ search_q | urlencode }}{% endif %}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if filter_site %}&site_id={{ filter_site }}{% endif %}{% endset %}
+      {% if page > 1 %}
+        <a href="/news?{{ qs_base }}&page={{ page - 1 }}" style="padding:6px 14px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#374151;text-decoration:none;background:white">← Anterior</a>
+      {% endif %}
+      <span style="font-size:12px;color:#6b7280">Página {{ page }} de {{ total_pages }} · {{ total_count }} artículos</span>
+      {% if page < total_pages %}
+        <a href="/news?{{ qs_base }}&page={{ page + 1 }}" style="padding:6px 14px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#374151;text-decoration:none;background:white">Siguiente →</a>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 </div>
 

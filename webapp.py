@@ -2436,10 +2436,13 @@ def scrape_all():
     return RedirectResponse("/news", status_code=303)
 
 
+PAGE_SIZE = 200
+
 @app.get("/news", response_class=HTMLResponse)
 async def news(request: Request, date_filter: Optional[str] = None,
                date_from: Optional[str] = None, date_to: Optional[str] = None,
-               site_id: Optional[str] = None, q: Optional[str] = None):
+               site_id: Optional[str] = None, q: Optional[str] = None,
+               page: int = 1):
     db     = get_db()
     where  = []
     params = []
@@ -2456,7 +2459,6 @@ async def news(request: Request, date_filter: Optional[str] = None,
         params.extend([like, like, like, like, like, like])
         filter_date = ""
     elif date_from or date_to:
-        # Date range mode
         filter_date = ""
         if date_from and date_to:
             where.append("a.scrape_date BETWEEN ? AND ?")
@@ -2476,7 +2478,12 @@ async def news(request: Request, date_filter: Optional[str] = None,
         where.append("a.site_id=?")
         params.append(site_id_int)
 
+    page = max(1, page)
+    offset = (page - 1) * PAGE_SIZE
     where_sql = " AND ".join(where) if where else "1=1"
+
+    total_count = db.execute(f"SELECT COUNT(*) FROM articles a JOIN sites s ON s.id=a.site_id WHERE {where_sql}", params).fetchone()[0]
+
     articles = db.execute(f"""
         SELECT a.*, s.name AS site_name,
             COALESCE(
@@ -2489,7 +2496,10 @@ async def news(request: Request, date_filter: Optional[str] = None,
         JOIN sites s ON s.id=a.site_id
         WHERE {where_sql}
         ORDER BY a.scrape_date DESC, a.id DESC
-    """, params).fetchall()
+        LIMIT ? OFFSET ?
+    """, params + [PAGE_SIZE, offset]).fetchall()
+
+    total_pages = max(1, (total_count + PAGE_SIZE - 1) // PAGE_SIZE)
 
     sites = db.execute("SELECT id,name FROM sites WHERE active=1 ORDER BY name").fetchall()
     dates = [r["scrape_date"] for r in
@@ -2502,7 +2512,8 @@ async def news(request: Request, date_filter: Optional[str] = None,
         sites=sites, filter_date=filter_date, filter_site=site_id_int,
         search_q=q or "", available_dates=dates,
         date_from=date_from or "", date_to=date_to or "",
-        search_kpis=search_kpis))
+        search_kpis=search_kpis,
+        page=page, total_pages=total_pages, total_count=total_count))
 
 
 @app.post("/articles/{article_id}")
