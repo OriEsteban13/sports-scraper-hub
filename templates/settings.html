@@ -241,6 +241,54 @@
       <a href="/sites" style="font-size:12px;color:#14b8a6;text-decoration:none;white-space:nowrap">Gestionar sitios →</a>
     </div>
   </div>
+
+  <!-- Bulk apply bar -->
+  <div style="padding:10px 18px;background:#f8fafc;border-bottom:2px solid #e5e7eb;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:11px;font-weight:700;color:#374151;white-space:nowrap">Aplicar a todos los medios visibles:</span>
+
+    <div style="display:flex;align-items:center;gap:6px">
+      <label style="font-size:11px;color:#6b7280;white-space:nowrap">📰 Frecuencia scraping</label>
+      <select id="bulk-scrape-freq" style="border:1px solid #e5e7eb;border-radius:6px;font-size:12px;padding:4px 8px">
+        <option value="">— sin cambio —</option>
+        <option value="0">Manual</option>
+        <option value="1">Cada día</option>
+        <option value="2">Cada 2 días</option>
+        <option value="3">Cada 3 días</option>
+        <option value="7">1/semana</option>
+        <option value="14">Cada 2 sem.</option>
+        <option value="30">1/mes</option>
+      </select>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px">
+      <label style="font-size:11px;color:#6b7280;white-space:nowrap">📊 Frecuencia tráfico</label>
+      <select id="bulk-traffic-freq" style="border:1px solid #e5e7eb;border-radius:6px;font-size:12px;padding:4px 8px">
+        <option value="">— sin cambio —</option>
+        <option value="0">Manual</option>
+        <option value="1">Cada día</option>
+        <option value="3">Cada 3 días</option>
+        <option value="5">Cada 5 días</option>
+        <option value="7">1/semana</option>
+        <option value="14">Cada 2 sem.</option>
+        <option value="30">1/mes</option>
+      </select>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px">
+      <label style="font-size:11px;color:#6b7280;white-space:nowrap">Auto-enrich</label>
+      <select id="bulk-enrich" style="border:1px solid #e5e7eb;border-radius:6px;font-size:12px;padding:4px 8px">
+        <option value="">— sin cambio —</option>
+        <option value="1">Activar</option>
+        <option value="0">Desactivar</option>
+      </select>
+    </div>
+
+    <button onclick="applyBulk()" id="bulk-apply-btn"
+            style="padding:6px 16px;background:#14b8a6;color:white;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+      ✓ Aplicar y guardar
+    </button>
+    <span id="bulk-status" style="font-size:11px;color:#6b7280"></span>
+  </div>
   <table class="settings-table" style="width:100%;border-collapse:collapse;min-width:1200px">
     <thead style="background:#fafafa;border-bottom:2px solid #f3f4f6">
       <tr>
@@ -382,6 +430,57 @@
 </div>
 
 <script>
+async function applyBulk() {
+  const scrapeFreq  = document.getElementById('bulk-scrape-freq').value;
+  const trafficFreq = document.getElementById('bulk-traffic-freq').value;
+  const enrich      = document.getElementById('bulk-enrich').value;
+
+  if (scrapeFreq === '' && trafficFreq === '' && enrich === '') {
+    alert('Selecciona al menos un campo para aplicar.');
+    return;
+  }
+
+  // Get all visible rows
+  const rows = [...document.querySelectorAll('#settings-tbody tr[id^="site_row_"]')]
+    .filter(r => !r.classList.contains('row-hidden'));
+
+  if (!rows.length) { alert('No hay medios visibles.'); return; }
+  if (!confirm(`¿Aplicar cambios a ${rows.length} medios?`)) return;
+
+  const btn = document.getElementById('bulk-apply-btn');
+  const status = document.getElementById('bulk-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ Guardando...';
+
+  let ok = 0, fail = 0;
+  for (const row of rows) {
+    const sid = row.id.replace('site_row_', '');
+    // Apply values to the row's controls
+    if (scrapeFreq !== '')  document.getElementById('freq_' + sid).value = scrapeFreq;
+    if (trafficFreq !== '') document.getElementById('traffic_freq_' + sid).value = trafficFreq;
+    if (enrich !== '')      document.getElementById('enrich_' + sid).checked = enrich === '1';
+
+    // Save
+    const fd = new FormData();
+    fd.append('scrape_frequency_days',  document.getElementById('freq_' + sid).value);
+    fd.append('auto_enrich',            document.getElementById('enrich_' + sid).checked ? 1 : 0);
+    fd.append('traffic_frequency_days', document.getElementById('traffic_freq_' + sid).value);
+    fd.append('monthly_visits_manual',  parseInt(document.getElementById('manual_' + sid).value) || 0);
+    fd.append('country',                document.getElementById('country_' + sid).value);
+    try {
+      const r = await fetch('/sites/' + sid + '/schedule', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) ok++; else fail++;
+    } catch { fail++; }
+    status.textContent = `${ok + fail}/${rows.length}…`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '✓ Aplicar y guardar';
+  status.textContent = `✓ ${ok} guardados${fail ? ` · ${fail} errores` : ''}`;
+  setTimeout(() => status.textContent = '', 4000);
+}
+
 async function saveSchedule(siteId) {
   const btn = document.getElementById('btn_' + siteId);
   const fd  = new FormData();
