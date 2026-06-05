@@ -1421,13 +1421,30 @@ def compute_search_kpis(db, query: str, days: int = 14) -> dict:
         WHERE {where} GROUP BY s.id ORDER BY c DESC LIMIT 5
     """, params).fetchall()
 
+    # Country distribution
+    country_rows = db.execute(f"""
+        SELECT COALESCE(NULLIF(s.country,''),'WW') AS code,
+               COUNT(*) AS c, COUNT(DISTINCT s.id) AS sites
+        FROM articles a JOIN sites s ON s.id=a.site_id
+        WHERE {where}
+        GROUP BY code ORDER BY c DESC
+    """, params).fetchall()
+    country_dist = []
+    for r in country_rows:
+        name, flag = COUNTRY_BY_CODE.get(r["code"], (r["code"], "🌐"))
+        country_dist.append({
+            "code": r["code"], "name": name, "flag": flag,
+            "count": r["c"], "sites": r["sites"],
+        })
+
     return {
-        "total":     total,
-        "today":     today_cnt,
-        "ots":       ots_sum,
-        "vpe":       vpe_sum,
-        "series":    series,
-        "top_sites": [{"name": r["name"], "count": r["c"]} for r in top_sites],
+        "total":        total,
+        "today":        today_cnt,
+        "ots":          ots_sum,
+        "vpe":          vpe_sum,
+        "series":       series,
+        "top_sites":    [{"name": r["name"], "count": r["c"]} for r in top_sites],
+        "country_dist": country_dist,
     }
 
 

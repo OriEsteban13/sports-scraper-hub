@@ -226,6 +226,82 @@
       }
     });
   </script>
+
+  <!-- Geographic distribution -->
+  {% if search_kpis and search_kpis.country_dist %}
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:16px">
+    <div class="card" style="padding:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-size:12px;font-weight:600;color:#111827">Distribución geográfica</span>
+        <span style="font-size:10px;color:#9ca3af">artículos por país del medio</span>
+      </div>
+      <div id="newsWorldMap" style="height:260px"></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:12px 16px;border-bottom:1px solid #f3f4f6">
+        <span style="font-size:12px;font-weight:600;color:#111827">Por país</span>
+      </div>
+      <div style="overflow-y:auto;max-height:260px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:#fafafa">
+            <tr>
+              <th style="padding:6px 12px;text-align:left;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">País</th>
+              <th style="padding:6px 8px;text-align:right;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">Medios</th>
+              <th style="padding:6px 12px;text-align:right;color:#6b7280;font-size:10px;font-weight:600;text-transform:uppercase">Artículos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set max_c = (search_kpis.country_dist | map(attribute='count') | max) or 1 %}
+            {% for cd in search_kpis.country_dist %}
+            <tr style="border-top:1px solid #f3f4f6">
+              <td style="padding:6px 12px">
+                <span style="font-size:14px">{{ cd.flag }}</span>
+                <span style="margin-left:6px;color:#111827">{{ cd.name }}</span>
+              </td>
+              <td style="padding:6px 8px;text-align:right;color:#9ca3af">{{ cd.sites }}</td>
+              <td style="padding:6px 12px;text-align:right">
+                <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
+                  <div style="width:40px;height:4px;background:#f0fdfa;border-radius:2px;position:relative">
+                    <div style="position:absolute;top:0;left:0;height:100%;border-radius:2px;background:#0d9488;width:{{ (cd.count / max_c * 100)|round|int }}%"></div>
+                  </div>
+                  <span style="color:#111827;font-weight:500;min-width:28px;text-align:right">{{ cd.count }}</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script>
+  (function initNewsMap(){
+    const data = {{ search_kpis.country_dist | tojson }};
+    const values = {};
+    data.forEach(d => { if (d.code !== 'WW') values[d.code] = d.count; });
+    const lookup = Object.fromEntries(data.map(d => [d.code, d]));
+    if (typeof jsVectorMap === 'undefined') {
+      document.getElementById('newsWorldMap').innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:12px">Mapa no disponible</div>';
+      return;
+    }
+    new jsVectorMap({
+      selector: '#newsWorldMap', map: 'world', backgroundColor: 'transparent', zoomButtons: true,
+      regionStyle: {
+        initial: { fill:'#f3f4f6', stroke:'#e5e7eb', strokeWidth:0.5 },
+        hover:   { fill:'#5eead4', cursor:'pointer' },
+      },
+      series: { regions: [{ attribute:'fill', scale:['#cdf6ed','#0d9488'], normalizeFunction:'polynomial', values }] },
+      onRegionTooltipShow(event, tooltip, code) {
+        const d = lookup[code];
+        const country = (d && d.name) ? `${d.flag} ${d.name}` : code;
+        const count = (d && d.count) ? d.count : 0;
+        tooltip.text(`${country}: <b>${count}</b> artículos${d&&d.sites?' · '+d.sites+' medios':''}`, true);
+      }
+    });
+  })();
+  </script>
+  {% endif %}
   {% endif %}
 
   <!-- Table -->
