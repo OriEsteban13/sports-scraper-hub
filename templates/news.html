@@ -52,16 +52,35 @@
 
   <!-- Filters bar -->
   <form method="get" action="/news" class="card" style="padding:12px 18px;margin-bottom:16px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
-    <!-- Search input -->
-    <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:240px;max-width:380px">
-      <svg style="width:14px;height:14px;color:#9ca3af" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" name="q" value="{{ search_q }}"
-             placeholder="Buscar en titular, contenido, marca..."
-             style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:6px 10px;width:100%"
-             autocomplete="off">
+    <!-- Search inputs -->
+    <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:240px;max-width:520px">
+      <!-- Term 1 -->
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:#0d9488;background:#f0fdfa;border:1px solid #99f6e4;border-radius:4px;padding:1px 6px;flex-shrink:0">T1</span>
+        <svg style="width:13px;height:13px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" name="q" value="{{ search_q }}"
+               placeholder="Buscar en titular, contenido, marca..."
+               style="border:1px solid #e5e7eb;border-radius:8px;font-size:13px;padding:6px 10px;width:100%"
+               autocomplete="off">
+      </div>
+      <!-- Term 2 (shown when comparing) -->
+      <div id="q2-wrap" style="display:{% if search_q2 %}flex{% else %}none{% endif %};align-items:center;gap:6px">
+        <span style="font-size:10px;font-weight:700;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;flex-shrink:0">T2</span>
+        <svg style="width:13px;height:13px;color:#9ca3af;flex-shrink:0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" name="q2" id="q2-input" value="{{ search_q2 }}"
+               placeholder="Segundo término para comparar..."
+               style="border:1px solid #bfdbfe;border-radius:8px;font-size:13px;padding:6px 10px;width:100%"
+               autocomplete="off">
+        <button type="button" onclick="hideCompare()" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0">×</button>
+      </div>
     </div>
     <button type="submit" class="btn-primary" style="font-size:12px;padding:5px 12px">Buscar</button>
     {% if search_q %}
+    <button type="button" id="compare-btn" onclick="showCompare()"
+            style="display:{% if search_q2 %}none{% else %}inline-flex{% endif %};align-items:center;gap:5px;font-size:11px;padding:5px 10px;border:1px solid #bfdbfe;border-radius:7px;background:#eff6ff;color:#2563eb;cursor:pointer;font-weight:600">
+      <svg style="width:12px;height:12px" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><path d="M11 18H8a2 2 0 01-2-2V9"/></svg>
+      Comparar
+    </button>
     <button type="button" onclick="saveCurrentSearch()" class="btn-ghost" style="font-size:11px;padding:5px 10px" title="Guardar como búsqueda recurrente">
       <svg style="width:12px;height:12px;display:inline;vertical-align:middle" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
       Guardar
@@ -307,6 +326,143 @@
     });
   })();
   </script>
+  {% endif %}
+
+  <!-- ── Comparison block ─────────────────────────────────────────────── -->
+  {% if search_kpis and search_kpis2 %}
+  {% set C1 = "#0d9488" %}{% set C2 = "#2563eb" %}
+  <div style="margin-bottom:16px">
+
+    <!-- KPI Overview -->
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+      <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:10px">
+        <svg style="width:16px;height:16px;color:#6b7280" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        <span style="font-size:13px;font-weight:600;color:#111827">KPI Overview</span>
+        <span style="font-size:11px;color:#9ca3af">Comparativa de indicadores</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead style="background:#fafafa">
+          <tr>
+            <th style="padding:10px 18px;text-align:left;color:#6b7280;font-size:11px;font-weight:600;text-transform:uppercase;width:35%">Métrica</th>
+            <th style="padding:10px 18px;text-align:left;font-size:13px;font-weight:700;color:{{ C1 }}">
+              <span style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:5px;padding:2px 8px">{{ search_q }}</span>
+            </th>
+            <th style="padding:10px 18px;text-align:left;font-size:13px;font-weight:700;color:{{ C2 }}">
+              <span style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:5px;padding:2px 8px">{{ search_q2 }}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for metric, v1, v2 in [
+            ("Menciones totales", search_kpis.total, search_kpis2.total),
+            ("Medios distintos",  search_kpis.outlets_count, search_kpis2.outlets_count),
+            ("Países",            search_kpis.countries_count, search_kpis2.countries_count),
+            ("Hoy",               search_kpis.today, search_kpis2.today),
+          ] %}
+          <tr style="border-top:1px solid #f3f4f6">
+            <td style="padding:10px 18px;color:#374151;font-weight:500">{{ metric }}</td>
+            <td style="padding:10px 18px;font-weight:700;color:{% if v1 >= v2 %}{{ C1 }}{% else %}#6b7280{% endif %}">
+              {{ v1 | fmtnum }}
+              {% if v1 > v2 %}<span style="font-size:10px;color:#0d9488;margin-left:4px">▲</span>{% elif v2 > v1 %}<span style="font-size:10px;color:#9ca3af;margin-left:4px">▼</span>{% endif %}
+            </td>
+            <td style="padding:10px 18px;font-weight:700;color:{% if v2 >= v1 %}{{ C2 }}{% else %}#6b7280{% endif %}">
+              {{ v2 | fmtnum }}
+              {% if v2 > v1 %}<span style="font-size:10px;color:#2563eb;margin-left:4px">▲</span>{% elif v1 > v2 %}<span style="font-size:10px;color:#9ca3af;margin-left:4px">▼</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- By Country + By Media Outlet -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+
+      <!-- By Country -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+          <div style="font-size:13px;font-weight:600;color:#111827">Por País</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:2px">Menciones por país del medio</div>
+        </div>
+        <div style="overflow-y:auto;max-height:400px;padding:12px 18px;display:flex;flex-direction:column;gap:14px">
+          {% set all_codes = (search_kpis.country_dist | map(attribute='code') | list) %}
+          {% set cd2_map = {} %}
+          {% for cd in search_kpis2.country_dist %}{% set _ = cd2_map.update({cd.code: cd}) %}{% endfor %}
+          {% set combined = [] %}
+          {% for cd in search_kpis.country_dist %}{% set _ = combined.append({'code': cd.code, 'name': cd.name, 'flag': cd.flag, 'c1': cd.count, 'c2': (cd2_map[cd.code].count if cd.code in cd2_map else 0)}) %}{% endfor %}
+          {% for cd in search_kpis2.country_dist %}{% if cd.code not in all_codes %}{% set _ = combined.append({'code': cd.code, 'name': cd.name, 'flag': cd.flag, 'c1': 0, 'c2': cd.count}) %}{% endif %}{% endfor %}
+          {% set max_c = ([1] + (combined | map(attribute='c1') | list) + (combined | map(attribute='c2') | list)) | max %}
+          {% for row in combined | sort(attribute='c1', reverse=True) | list %}
+          {% if row.c1 > 0 or row.c2 > 0 %}
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+              <span style="font-size:14px">{{ row.flag }}</span>
+              <span style="font-size:12px;font-weight:600;color:#111827">{{ row.name }}</span>
+            </div>
+            <!-- T1 bar -->
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+              <span style="font-size:10px;font-weight:700;color:{{ C1 }};width:18px;text-align:right;flex-shrink:0">T1</span>
+              <div style="flex:1;height:8px;background:#f0fdfa;border-radius:4px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:4px;background:{{ C1 }};width:{{ (row.c1 / max_c * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-size:11px;font-weight:600;color:#374151;min-width:28px;text-align:right">{{ row.c1 }}</span>
+            </div>
+            <!-- T2 bar -->
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:10px;font-weight:700;color:{{ C2 }};width:18px;text-align:right;flex-shrink:0">T2</span>
+              <div style="flex:1;height:8px;background:#eff6ff;border-radius:4px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:4px;background:{{ C2 }};width:{{ (row.c2 / max_c * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-size:11px;font-weight:600;color:#374151;min-width:28px;text-align:right">{{ row.c2 }}</span>
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- By Media Outlet -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid #f3f4f6">
+          <div style="font-size:13px;font-weight:600;color:#111827">Por Medio</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:2px">Menciones por medio de comunicación</div>
+        </div>
+        <div style="overflow-y:auto;max-height:400px;padding:12px 18px;display:flex;flex-direction:column;gap:14px">
+          {% set s1_map = {} %}
+          {% for s in search_kpis.top_sites %}{% set _ = s1_map.update({s.name: s.count}) %}{% endfor %}
+          {% set s2_map = {} %}
+          {% for s in search_kpis2.top_sites %}{% set _ = s2_map.update({s.name: s.count}) %}{% endfor %}
+          {% set all_names = (search_kpis.top_sites | map(attribute='name') | list) %}
+          {% set combined_s = [] %}
+          {% for s in search_kpis.top_sites %}{% set _ = combined_s.append({'name': s.name, 'c1': s.count, 'c2': (s2_map[s.name] if s.name in s2_map else 0)}) %}{% endfor %}
+          {% for s in search_kpis2.top_sites %}{% if s.name not in all_names %}{% set _ = combined_s.append({'name': s.name, 'c1': 0, 'c2': s.count}) %}{% endif %}{% endfor %}
+          {% set max_s = ([1] + (combined_s | map(attribute='c1') | list) + (combined_s | map(attribute='c2') | list)) | max %}
+          {% for row in combined_s | sort(attribute='c1', reverse=True) | list %}
+          {% if row.c1 > 0 or row.c2 > 0 %}
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:5px">{{ row.name }}</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+              <span style="font-size:10px;font-weight:700;color:{{ C1 }};width:18px;text-align:right;flex-shrink:0">T1</span>
+              <div style="flex:1;height:8px;background:#f0fdfa;border-radius:4px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:4px;background:{{ C1 }};width:{{ (row.c1 / max_s * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-size:11px;font-weight:600;color:#374151;min-width:28px;text-align:right">{{ row.c1 }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:10px;font-weight:700;color:{{ C2 }};width:18px;text-align:right;flex-shrink:0">T2</span>
+              <div style="flex:1;height:8px;background:#eff6ff;border-radius:4px;position:relative">
+                <div style="position:absolute;top:0;left:0;height:100%;border-radius:4px;background:{{ C2 }};width:{{ (row.c2 / max_s * 100)|round|int }}%"></div>
+              </div>
+              <span style="font-size:11px;font-weight:600;color:#374151;min-width:28px;text-align:right">{{ row.c2 }}</span>
+            </div>
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+  </div>
   {% endif %}
   {% endif %}
 
@@ -909,6 +1065,17 @@ async function enrichAll() {
     ? `Cancelado · ${ok}/${total} enriquecidos`
     : `✓ Listo · ${ok}/${total} enriquecidos`;
   setTimeout(() => label.textContent = 'Enriquecer todos', 6000);
+}
+
+function showCompare() {
+  document.getElementById('q2-wrap').style.display = 'flex';
+  document.getElementById('compare-btn').style.display = 'none';
+  document.getElementById('q2-input').focus();
+}
+function hideCompare() {
+  document.getElementById('q2-wrap').style.display = 'none';
+  document.getElementById('compare-btn').style.display = 'inline-flex';
+  document.getElementById('q2-input').value = '';
 }
 </script>
 {% endblock %}

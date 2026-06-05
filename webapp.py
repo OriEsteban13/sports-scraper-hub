@@ -1393,11 +1393,16 @@ def compute_search_kpis(db, query: str, days: int = 14) -> dict:
     where, params = _search_where(query)
     today = date.today().isoformat()
 
-    total      = db.execute(f"SELECT COUNT(*) FROM articles a WHERE {where}", params).fetchone()[0]
-    today_cnt  = db.execute(f"SELECT COUNT(*) FROM articles a WHERE {where} AND a.scrape_date=?",
-                            params + [today]).fetchone()[0]
-    ots_sum    = db.execute(f"SELECT COALESCE(SUM(a.ots),0) FROM articles a WHERE {where}", params).fetchone()[0]
-    vpe_sum    = db.execute(f"SELECT COALESCE(SUM(a.vpe),0) FROM articles a WHERE {where}", params).fetchone()[0]
+    total         = db.execute(f"SELECT COUNT(*) FROM articles a WHERE {where}", params).fetchone()[0]
+    today_cnt     = db.execute(f"SELECT COUNT(*) FROM articles a WHERE {where} AND a.scrape_date=?",
+                               params + [today]).fetchone()[0]
+    ots_sum       = db.execute(f"SELECT COALESCE(SUM(a.ots),0) FROM articles a WHERE {where}", params).fetchone()[0]
+    vpe_sum       = db.execute(f"SELECT COALESCE(SUM(a.vpe),0) FROM articles a WHERE {where}", params).fetchone()[0]
+    outlets_count = db.execute(f"SELECT COUNT(DISTINCT a.site_id) FROM articles a WHERE {where}", params).fetchone()[0]
+    countries_count = db.execute(f"""
+        SELECT COUNT(DISTINCT COALESCE(NULLIF(s.country,''),'WW'))
+        FROM articles a JOIN sites s ON s.id=a.site_id WHERE {where}
+    """, params).fetchone()[0]
 
     # Daily series for last N days (fill zeros for missing dates)
     series_rows = db.execute(f"""
@@ -1414,11 +1419,11 @@ def compute_search_kpis(db, query: str, days: int = 14) -> dict:
         d = (today_d - timedelta(days=i)).isoformat()
         series.append({"date": d, "count": series_map.get(d, 0)})
 
-    # Top media
+    # Top media (top 15 for comparison mode)
     top_sites = db.execute(f"""
         SELECT s.name, COUNT(*) AS c FROM articles a
         JOIN sites s ON s.id=a.site_id
-        WHERE {where} GROUP BY s.id ORDER BY c DESC LIMIT 5
+        WHERE {where} GROUP BY s.id, s.name ORDER BY c DESC LIMIT 15
     """, params).fetchall()
 
     # Country distribution
@@ -1438,13 +1443,15 @@ def compute_search_kpis(db, query: str, days: int = 14) -> dict:
         })
 
     return {
-        "total":        total,
-        "today":        today_cnt,
-        "ots":          ots_sum,
-        "vpe":          vpe_sum,
-        "series":       series,
-        "top_sites":    [{"name": r["name"], "count": r["c"]} for r in top_sites],
-        "country_dist": country_dist,
+        "total":           total,
+        "today":           today_cnt,
+        "ots":             ots_sum,
+        "vpe":             vpe_sum,
+        "outlets_count":   outlets_count,
+        "countries_count": countries_count,
+        "series":          series,
+        "top_sites":       [{"name": r["name"], "count": r["c"]} for r in top_sites],
+        "country_dist":    country_dist,
     }
 
 
@@ -2468,7 +2475,7 @@ PAGE_SIZE = 200
 async def news(request: Request, date_filter: Optional[str] = None,
                date_from: Optional[str] = None, date_to: Optional[str] = None,
                site_id: Optional[str] = None, q: Optional[str] = None,
-               page: int = 1):
+               q2: Optional[str] = None, page: int = 1):
     db     = get_db()
     where  = []
     params = []
@@ -2531,14 +2538,15 @@ async def news(request: Request, date_filter: Optional[str] = None,
     dates = [r["scrape_date"] for r in
              db.execute("SELECT DISTINCT scrape_date FROM articles ORDER BY scrape_date DESC LIMIT 60").fetchall()]
 
-    search_kpis = compute_search_kpis(db, q, days=30) if q else None
+    search_kpis  = compute_search_kpis(db, q,  days=30) if q  else None
+    search_kpis2 = compute_search_kpis(db, q2, days=30) if q2 else None
     db.close()
     return templates.TemplateResponse(request=request, name="news.html", context=dict(
         request=request, active_page="news", articles=articles,
         sites=sites, filter_date=filter_date, filter_site=site_id_int,
-        search_q=q or "", available_dates=dates,
+        search_q=q or "", search_q2=q2 or "", available_dates=dates,
         date_from=date_from or "", date_to=date_to or "",
-        search_kpis=search_kpis,
+        search_kpis=search_kpis, search_kpis2=search_kpis2,
         page=page, total_pages=total_pages, total_count=total_count))
 
 
