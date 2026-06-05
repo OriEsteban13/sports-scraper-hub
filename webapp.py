@@ -1347,14 +1347,23 @@ _BRAND_LIKE_COLS = ("a.title", "a.body", "a.summary",
                     "a.company_property", "a.company_brand", "a.company_agency")
 
 def _search_where(query: str):
-    """Build SQL WHERE clause + params for a single search phrase (whole-word match)."""
+    """Build SQL WHERE clause + params.
+    Splits query by spaces; all tokens must appear somewhere in the article (AND logic).
+    E.g. 'FC Barcelona' → articles containing both 'FC' AND 'Barcelona'.
+    """
     if not query:
         return "1=1", []
-    like = f"% {query} %"
-    # Pad each column with spaces so the pattern only fires at word boundaries
+    tokens = [t for t in query.split() if t]
+    if not tokens:
+        return "1=1", []
     cols = [f"(' '||COALESCE({c},'')||' ')" for c in _BRAND_LIKE_COLS]
-    clause = "(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")"
-    return clause, [like] * len(_BRAND_LIKE_COLS)
+    # Each token must match in at least one column
+    token_clauses, params = [], []
+    for token in tokens:
+        like = f"%{token}%"
+        token_clauses.append("(" + " OR ".join(f"{c} LIKE ?" for c in cols) + ")")
+        params.extend([like] * len(_BRAND_LIKE_COLS))
+    return "(" + " AND ".join(token_clauses) + ")", params
 
 
 def _split_keywords(text: str) -> list[str]:
@@ -2450,13 +2459,13 @@ async def news(request: Request, date_filter: Optional[str] = None,
     site_id_int = int(site_id) if site_id and site_id.isdigit() else None
 
     if q:
-        where.append("""(
-            a.title LIKE ? OR a.body LIKE ? OR a.summary LIKE ?
-            OR a.company_property LIKE ? OR a.company_brand LIKE ?
-            OR a.company_agency LIKE ?
-        )""")
-        like = f"%{q}%"
-        params.extend([like, like, like, like, like, like])
+        # Each word in the query must appear in at least one field (AND between words)
+        _news_cols = ("a.title", "a.body", "a.summary",
+                      "a.company_property", "a.company_brand", "a.company_agency")
+        for _token in (t for t in q.split() if t):
+            _like = f"%{_token}%"
+            where.append("(" + " OR ".join(f"{c} LIKE ?" for c in _news_cols) + ")")
+            params.extend([_like] * len(_news_cols))
         filter_date = ""
     elif date_from or date_to:
         filter_date = ""
