@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/css/jsvectormap.min.css">
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/js/jsvectormap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
+{% endblock %}
+
 {% block title %}Noticias · Scraper Hub{% endblock %}
 {% block page_title %}Noticias{% endblock %}
 {% block page_sub %}Tabla de artículos por noticia — {{ filter_date }}{% endblock %}
