@@ -4363,7 +4363,7 @@ async def bulk_scrape(request: Request, file: UploadFile = File(None),
                 "url":        url,
                 "title":      title_hint,
                 "date":       date_hint,
-                "body":       full["body"][:5000],
+                "body":       full["body"][:15000],
                 "body_len":   len(full["body"]),
                 "images":     full["images"],
                 "videos":     full["videos"],
@@ -4393,7 +4393,7 @@ async def bulk_extract_one(request: Request):
         full = fetch_article_full(url, stealth)
         return JSONResponse({
             "ok": True,
-            "body":     full["body"][:5000],
+            "body":     full["body"][:15000],
             "body_len": len(full["body"]),
             "images":   full["images"],
             "videos":   full["videos"],
@@ -4401,6 +4401,105 @@ async def bulk_extract_one(request: Request):
         })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:300]})
+
+
+@app.post("/bulk/download-zip")
+async def bulk_download_zip(request: Request):
+    """Create a ZIP with articles.csv + downloaded images named {id}_img_{n}.ext
+    and a videos_manifest.csv. Images are fetched concurrently (max 20 threads)."""
+    import zipfile, csv as _csv, io as _io, mimetypes as _mt
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import urllib.request as _ur
+    from urllib.parse import urlparse as _up
+
+    body_bytes = await request.body()
+    data = json.loads(body_bytes)
+    rows = data.get("results", [])
+
+    def _ext(url: str) -> str:
+        path = _up(url).path
+        _, e = os.path.splitext(path)
+        return e.lower() if e.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg"} else ".jpg"
+
+    def _fetch_img(url: str, timeout: int = 6):
+        req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with _ur.urlopen(req, timeout=timeout) as r:
+            return r.read()
+
+    # Build CSV data and collect all image tasks
+    csv_buf = _io.StringIO()
+    fields = ["id", "url", "title", "date", "sentiment", "chars", "imgs", "vids", "body", "error"]
+    writer = _csv.DictWriter(csv_buf, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+
+    img_tasks = []   # (article_id, img_n, img_url)
+    vid_rows  = []   # (article_id, vid_n, vid_url, article_url, title)
+
+    for idx, r in enumerate(rows):
+        aid = f"{idx + 1:05d}"
+        images = r.get("images") or []
+        videos = r.get("videos") or []
+        writer.writerow({
+            "id":        aid,
+            "url":       r.get("url", ""),
+            "title":     r.get("title", ""),
+            "date":      r.get("date", ""),
+            "sentiment": r.get("sentiment", ""),
+            "chars":     r.get("body_len", 0),
+            "imgs":      len(images),
+            "vids":      len(videos),
+            "body":      r.get("body", ""),
+            "error":     r.get("error", ""),
+        })
+        for n, img in enumerate(images[:15]):
+            img_tasks.append((aid, n, img))
+        for n, vid in enumerate(videos[:5]):
+            vid_rows.append((aid, n, vid, r.get("url", ""), r.get("title", "")))
+
+    # Download images in parallel using a thread pool
+    downloaded = {}  # (aid, n) -> bytes
+
+    def _download_all():
+        with ThreadPoolExecutor(max_workers=20) as pool:
+            futures = {
+                pool.submit(_fetch_img, img_url): (aid, n)
+                for aid, n, img_url in img_tasks
+            }
+            for fut in as_completed(futures):
+                key = futures[fut]
+                try:
+                    downloaded[key] = fut.result()
+                except Exception:
+                    pass
+
+    if img_tasks:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _download_all)
+
+    # Build videos manifest CSV
+    vid_buf = _io.StringIO()
+    vid_writer = _csv.writer(vid_buf)
+    vid_writer.writerow(["id", "video_n", "video_url", "article_url", "title"])
+    for row_v in vid_rows:
+        vid_writer.writerow(list(row_v))
+
+    # Assemble ZIP
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("articles.csv", csv_buf.getvalue().encode("utf-8-sig"))
+        zf.writestr("videos_manifest.csv", vid_buf.getvalue().encode("utf-8-sig"))
+        for aid, n, img_url in img_tasks:
+            key = (aid, n)
+            if key in downloaded:
+                fname = f"images/{aid}_{n:02d}{_ext(img_url)}"
+                zf.writestr(fname, downloaded[key])
+
+    zip_buf.seek(0)
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="camaleonic_clipping.zip"'},
+    )
 
 
 @app.post("/bulk/export")
@@ -4437,8 +4536,8 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
     HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
     ALT_FILL = PatternFill("solid", fgColor="F8FAFC")
 
-    headers = ["URL", "Título", "Fecha", "Sentiment", "Chars body", "Imágenes", "Vídeos", "Body (5k)", "Error"]
-    widths  = [50, 35, 14, 12, 10, 60, 60, 80, 30]
+    headers = ["URL", "Título", "Fecha", "Sentiment", "Chars body", "Imágenes", "Vídeos", "Body (texto completo)", "Error"]
+    widths  = [50, 35, 14, 12, 10, 60, 60, 120, 30]
     for ci, (h, w) in enumerate(zip(headers, widths), 1):
         cell = ws.cell(row=1, column=ci, value=h)
         cell.fill = HDR_FILL
@@ -4457,7 +4556,7 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
             r.get("body_len", 0),
             " | ".join(r.get("images") or []),
             " | ".join(r.get("videos") or []),
-            r.get("body", "")[:5000],
+            r.get("body", ""),
             r.get("error", ""),
         ]
         for ci, v in enumerate(vals, 1):

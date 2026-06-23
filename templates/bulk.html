@@ -79,13 +79,37 @@
 
 <!-- Results table -->
 <div id="results-section" style="display:none;margin-top:16px">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-    <h3 style="font-size:14px;font-weight:600;color:#111827" id="results-title">Resultados</h3>
-    <div style="display:flex;gap:8px">
+  <!-- Toolbar: title + search + actions -->
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+    <h3 style="font-size:14px;font-weight:600;color:#111827;margin:0;white-space:nowrap" id="results-title">Resultados</h3>
+
+    <!-- Search bar -->
+    <div style="flex:1;min-width:200px;position:relative">
+      <svg width="14" height="14" fill="none" stroke="#9ca3af" stroke-width="2" viewBox="0 0 24 24"
+           style="position:absolute;left:10px;top:50%;transform:translateY(-50%)">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input id="search-input" type="text" placeholder="Buscar en títulos y texto…"
+             oninput="debouncedSearch()"
+             style="width:100%;padding:6px 10px 6px 32px;font-size:12px;border:1px solid #e5e7eb;border-radius:8px;outline:none;box-sizing:border-box">
+    </div>
+    <span id="search-count" style="font-size:11px;color:#9ca3af;white-space:nowrap"></span>
+
+    <!-- Action buttons -->
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button id="extract-all-btn" onclick="extractAll()" class="btn-ghost" style="font-size:12px;padding:5px 10px">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Extraer todo
+      </button>
       <button onclick="exportResults('csv')" class="btn-ghost" style="font-size:12px;padding:5px 10px">CSV</button>
       <button onclick="exportResults('excel')" class="btn-primary" style="font-size:12px;padding:5px 10px">Excel</button>
+      <button onclick="downloadZip()" class="btn-ghost" style="font-size:12px;padding:5px 10px;border-color:#8b5cf6;color:#7c3aed">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        ZIP
+      </button>
     </div>
   </div>
+
   <div class="card" style="overflow:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px" id="results-table">
       <thead>
@@ -351,6 +375,103 @@ function resetAll() {
   document.getElementById('scrape-btn').disabled = true;
 }
 
+// ── Extract All ──────────────────────────────────────────────────────────────
+let extractAllRunning = false;
+
+async function extractAll() {
+  if (extractAllRunning) return;
+  extractAllRunning = true;
+  const btn = document.getElementById('extract-all-btn');
+  btn.disabled = true;
+
+  const stealth = document.getElementById('use-stealth').checked;
+  const CONCURRENCY = 3;
+  let queue = [];
+  for (let i = 0; i < scrapeResults.length; i++) {
+    const rowBtn = document.getElementById(`extract-btn-${i}`);
+    if (rowBtn && rowBtn.textContent.trim() === 'Extraer') queue.push(i);
+  }
+
+  const total = queue.length;
+  let done = 0;
+  btn.textContent = `Extrayendo 0/${total}…`;
+
+  async function runOne(idx) {
+    const rowBtn = document.getElementById(`extract-btn-${idx}`);
+    if (rowBtn) await extractOne(idx, rowBtn);
+    done++;
+    btn.textContent = `Extrayendo ${done}/${total}…`;
+  }
+
+  // Process CONCURRENCY items at a time
+  for (let i = 0; i < queue.length; i += CONCURRENCY) {
+    const batch = queue.slice(i, i + CONCURRENCY).map(runOne);
+    await Promise.all(batch);
+  }
+
+  btn.textContent = 'Extraer todo';
+  btn.disabled = false;
+  extractAllRunning = false;
+}
+
+// ── Search / filter ───────────────────────────────────────────────────────────
+let _searchTimer = null;
+function debouncedSearch() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(filterResults, 250);
+}
+
+function filterResults() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  const rows = document.querySelectorAll('#results-tbody tr');
+  let visible = 0;
+  rows.forEach((tr, i) => {
+    const r = scrapeResults[i];
+    if (!r) return;
+    const match = !q
+      || (r.url   || '').toLowerCase().includes(q)
+      || (r.title || '').toLowerCase().includes(q)
+      || (r.body  || '').toLowerCase().includes(q);
+    tr.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  const countEl = document.getElementById('search-count');
+  if (q) {
+    countEl.textContent = `${visible} resultado${visible !== 1 ? 's' : ''}`;
+  } else {
+    countEl.textContent = '';
+  }
+}
+
+// ── ZIP download ──────────────────────────────────────────────────────────────
+async function downloadZip() {
+  if (!scrapeResults.length) return;
+  const zipBtn = document.querySelector('[onclick="downloadZip()"]');
+  const origText = zipBtn.innerHTML;
+  zipBtn.disabled = true;
+  zipBtn.textContent = '⏳ Generando ZIP…';
+
+  try {
+    const resp = await fetch('/bulk/download-zip', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({results: scrapeResults}),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'camaleonic_clipping.zip';
+    a.click();
+  } catch(e) {
+    alert('Error generando ZIP: ' + e.message);
+  } finally {
+    zipBtn.innerHTML = origText;
+    zipBtn.disabled = false;
+  }
+}
+
+// ── Extract single ────────────────────────────────────────────────────────────
 async function extractOne(idx, btn) {
   const r = scrapeResults[idx];
   const stealth = document.getElementById('use-stealth').checked;
