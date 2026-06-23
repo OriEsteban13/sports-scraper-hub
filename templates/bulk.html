@@ -99,6 +99,7 @@
           <th style="padding:10px 12px;text-align:center;font-weight:600;color:#374151">Vids</th>
           <th style="padding:10px 12px;text-align:center;font-weight:600;color:#374151">Estado</th>
           <th style="padding:10px 12px;text-align:center;font-weight:600;color:#374151">Ver</th>
+          <th style="padding:10px 12px;text-align:center;font-weight:600;color:#374151">Extraer</th>
         </tr>
       </thead>
       <tbody id="results-tbody"></tbody>
@@ -282,6 +283,12 @@ function appendRow(tbody, r, idx) {
               style="font-size:11px;padding:3px 8px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;background:white;color:#374151">
         Ver
       </button>
+    </td>
+    <td style="padding:8px 12px;text-align:center">
+      <button id="extract-btn-${idx}" onclick="extractOne(${idx}, this)"
+              style="font-size:11px;padding:3px 10px;border:1px solid #14b8a6;border-radius:6px;cursor:pointer;background:#f0fdfa;color:#0f766e;font-weight:600">
+        Extraer
+      </button>
     </td>`;
   tbody.appendChild(tr);
 }
@@ -342,6 +349,64 @@ function resetAll() {
   document.getElementById('url-count').textContent = '';
   document.getElementById('csv-file').value = '';
   document.getElementById('scrape-btn').disabled = true;
+}
+
+async function extractOne(idx, btn) {
+  const r = scrapeResults[idx];
+  const stealth = document.getElementById('use-stealth').checked;
+
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  btn.style.opacity = '0.6';
+
+  try {
+    const resp = await fetch('/bulk/extract-one', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: r.url, stealth}),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      scrapeResults[idx].body     = data.body;
+      scrapeResults[idx].body_len = data.body_len;
+      scrapeResults[idx].images   = data.images;
+      scrapeResults[idx].videos   = data.videos;
+      scrapeResults[idx].ok       = true;
+      scrapeResults[idx].error    = '';
+
+      // Update chars / imgs / vids cells in the row
+      const row = btn.closest('tr');
+      const cells = row.querySelectorAll('td');
+      cells[4].textContent = data.body_len.toLocaleString('es-ES');
+      cells[5].textContent = (data.images||[]).length;
+      cells[6].textContent = (data.videos||[]).length;
+
+      btn.textContent = '✓ OK';
+      btn.style.background = '#f0fdf4';
+      btn.style.borderColor = '#16a34a';
+      btn.style.color = '#16a34a';
+      btn.style.opacity = '1';
+
+      showArticle(idx);
+    } else {
+      btn.textContent = '✗ Error';
+      btn.title = data.error || 'Error desconocido';
+      btn.style.background = '#fef2f2';
+      btn.style.borderColor = '#dc2626';
+      btn.style.color = '#dc2626';
+      btn.style.opacity = '1';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '✗ Error';
+    btn.title = String(e);
+    btn.style.background = '#fef2f2';
+    btn.style.borderColor = '#dc2626';
+    btn.style.color = '#dc2626';
+    btn.style.opacity = '1';
+    btn.disabled = false;
+  }
 }
 
 function esc(s) {

@@ -4381,6 +4381,28 @@ async def bulk_scrape(request: Request, file: UploadFile = File(None),
     return JSONResponse({"results": results})
 
 
+@app.post("/bulk/extract-one")
+async def bulk_extract_one(request: Request):
+    """Extract full content (body, images, videos) for a single URL."""
+    data = await request.json()
+    url = (data.get("url") or "").strip()
+    stealth = bool(data.get("stealth", False))
+    if not url:
+        return JSONResponse({"ok": False, "error": "No URL provided"})
+    try:
+        full = fetch_article_full(url, stealth)
+        return JSONResponse({
+            "ok": True,
+            "body":     full["body"][:5000],
+            "body_len": len(full["body"]),
+            "images":   full["images"],
+            "videos":   full["videos"],
+            "tier":     full.get("tier", ""),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:300]})
+
+
 @app.post("/bulk/export")
 async def bulk_export(request: Request, fmt: str = Form("excel")):
     """Accept JSON results body, return Excel or CSV download."""
