@@ -824,12 +824,62 @@ def fetch_site_links(url: str, css_selector: str, use_stealth: bool,
     return out, tier
 
 
+def _page_title(page) -> str:
+    """Extract best title from a scraped page."""
+    for sel, attr in [
+        ('meta[property="og:title"]',     "content"),
+        ('meta[name="twitter:title"]',    "content"),
+        ('meta[name="DC.title"]',         "content"),
+    ]:
+        for m in (page.css(sel) or []):
+            v = (m.attrib.get(attr) or "").strip()
+            if v: return v
+    for t in (page.css("title") or []):
+        v = (t.text or "").strip()
+        if v: return v
+    for h in (page.css("h1") or []):
+        v = (h.text or "").strip()
+        if v: return v[:250]
+    return ""
+
+
+def _page_date(page) -> str:
+    """Extract best publish date (YYYY-MM-DD) from a scraped page."""
+    # 1. Meta tags
+    for sel, attr in [
+        ('meta[property="article:published_time"]', "content"),
+        ('meta[name="pubdate"]',                    "content"),
+        ('meta[name="date"]',                       "content"),
+        ('meta[name="DC.date"]',                    "content"),
+        ('meta[itemprop="datePublished"]',           "content"),
+        ('meta[itemprop="datePublished"]',           "datetime"),
+    ]:
+        for m in (page.css(sel) or []):
+            v = (m.attrib.get(attr) or "").strip()
+            if v: return v[:10]
+    # 2. <time datetime="...">
+    for t in (page.css("time[datetime]") or []):
+        v = (t.attrib.get("datetime") or "").strip()
+        if v: return v[:10]
+    # 3. JSON-LD
+    import json as _j
+    for script in (page.css('script[type="application/ld+json"]') or []):
+        try:
+            data = _j.loads(script.text or "")
+            if isinstance(data, list): data = data[0]
+            for key in ("datePublished", "dateCreated", "dateModified"):
+                if key in data: return str(data[key])[:10]
+        except Exception:
+            pass
+    return ""
+
+
 def fetch_article_full(url: str, use_stealth: bool = False, cookies: dict | None = None,
                        cdp_url: str | None = None, start_tier: int = 1) -> dict:
-    """Fetch article and return body text + image URLs + video URLs + tier_used."""
+    """Fetch article and return body text + title + date + image URLs + video URLs + tier_used."""
     page, tier = _fetch_page(url, use_stealth, cookies=cookies, cdp_url=cdp_url, start_tier=start_tier)
     if not page:
-        return {"body": "", "images": [], "videos": [], "tier": tier}
+        return {"body": "", "title": "", "date": "", "images": [], "videos": [], "tier": tier}
 
     body = (page.get_all_text() or "").strip()
 
@@ -881,7 +931,14 @@ def fetch_article_full(url: str, use_stealth: bool = False, cookies: dict | None
             if abs_url not in seen_v:
                 seen_v.add(abs_url); videos.append(abs_url)
 
-    return {"body": body, "images": images[:20], "videos": videos[:5], "tier": tier}
+    return {
+        "body":   body,
+        "title":  _page_title(page),
+        "date":   _page_date(page),
+        "images": images[:20],
+        "videos": videos[:5],
+        "tier":   tier,
+    }
 
 
 # Back-compat shim (still used if something legacy calls it)
@@ -4358,11 +4415,13 @@ async def bulk_scrape(request: Request, file: UploadFile = File(None),
         date_hint  = _col(row, "date", "Date", "fecha", "Fecha")
         try:
             full = fetch_article_full(url, bool(use_stealth))
-            sentiment = analyze_sentiment_local(title_hint or url, "", full["body"])
+            title = title_hint or full.get("title") or ""
+            date  = date_hint  or full.get("date")  or ""
+            sentiment = analyze_sentiment_local(title or url, "", full["body"])
             results.append({
                 "url":        url,
-                "title":      title_hint,
-                "date":       date_hint,
+                "title":      title,
+                "date":       date,
                 "body":       full["body"][:15000],
                 "body_len":   len(full["body"]),
                 "images":     full["images"],
@@ -4392,12 +4451,14 @@ async def bulk_extract_one(request: Request):
     try:
         full = fetch_article_full(url, stealth)
         return JSONResponse({
-            "ok": True,
-            "body":     full["body"][:15000],
+            "ok":     True,
+            "title":  full.get("title", ""),
+            "date":   full.get("date", ""),
+            "body":   full["body"][:15000],
             "body_len": len(full["body"]),
-            "images":   full["images"],
-            "videos":   full["videos"],
-            "tier":     full.get("tier", ""),
+            "images": full["images"],
+            "videos": full["videos"],
+            "tier":   full.get("tier", ""),
         })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:300]})
@@ -4405,41 +4466,39 @@ async def bulk_extract_one(request: Request):
 
 @app.post("/bulk/download-zip")
 async def bulk_download_zip(request: Request):
-    """Create a ZIP with articles.csv + downloaded images named {id}_img_{n}.ext
-    and a videos_manifest.csv. Images are fetched concurrently (max 20 threads)."""
-    import zipfile, csv as _csv, io as _io, mimetypes as _mt
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    import urllib.request as _ur
-    from urllib.parse import urlparse as _up
+    """Create a ZIP with articles.csv + images_manifest.csv + videos_manifest.csv.
+    Images are NOT downloaded server-side to avoid timeouts; the manifest lists every
+    image URL with its article ID so the user can batch-download locally."""
+    import zipfile, csv as _csv, io as _io
 
     body_bytes = await request.body()
     data = json.loads(body_bytes)
     rows = data.get("results", [])
 
-    def _ext(url: str) -> str:
-        path = _up(url).path
-        _, e = os.path.splitext(path)
-        return e.lower() if e.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg"} else ".jpg"
+    # ── articles.csv ────────────────────────────────────────────────────────
+    art_buf = _io.StringIO()
+    art_writer = _csv.DictWriter(
+        art_buf,
+        fieldnames=["id", "url", "title", "date", "sentiment", "chars", "imgs", "vids", "body", "error"],
+        extrasaction="ignore",
+    )
+    art_writer.writeheader()
 
-    def _fetch_img(url: str, timeout: int = 6):
-        req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with _ur.urlopen(req, timeout=timeout) as r:
-            return r.read()
+    # ── images_manifest.csv ─────────────────────────────────────────────────
+    img_buf = _io.StringIO()
+    img_writer = _csv.writer(img_buf)
+    img_writer.writerow(["article_id", "img_n", "filename", "image_url", "article_url", "title"])
 
-    # Build CSV data and collect all image tasks
-    csv_buf = _io.StringIO()
-    fields = ["id", "url", "title", "date", "sentiment", "chars", "imgs", "vids", "body", "error"]
-    writer = _csv.DictWriter(csv_buf, fieldnames=fields, extrasaction="ignore")
-    writer.writeheader()
-
-    img_tasks = []   # (article_id, img_n, img_url)
-    vid_rows  = []   # (article_id, vid_n, vid_url, article_url, title)
+    # ── videos_manifest.csv ─────────────────────────────────────────────────
+    vid_buf = _io.StringIO()
+    vid_writer = _csv.writer(vid_buf)
+    vid_writer.writerow(["article_id", "vid_n", "video_url", "article_url", "title"])
 
     for idx, r in enumerate(rows):
-        aid = f"{idx + 1:05d}"
+        aid    = f"{idx + 1:05d}"
         images = r.get("images") or []
         videos = r.get("videos") or []
-        writer.writerow({
+        art_writer.writerow({
             "id":        aid,
             "url":       r.get("url", ""),
             "title":     r.get("title", ""),
@@ -4451,48 +4510,47 @@ async def bulk_download_zip(request: Request):
             "body":      r.get("body", ""),
             "error":     r.get("error", ""),
         })
-        for n, img in enumerate(images[:15]):
-            img_tasks.append((aid, n, img))
-        for n, vid in enumerate(videos[:5]):
-            vid_rows.append((aid, n, vid, r.get("url", ""), r.get("title", "")))
+        for n, img_url in enumerate(images[:20]):
+            _, ext = os.path.splitext(urlparse(img_url).path)
+            ext = ext.lower() if ext.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"} else ".jpg"
+            img_writer.writerow([aid, n, f"{aid}_{n:02d}{ext}", img_url, r.get("url", ""), r.get("title", "")])
+        for n, vid_url in enumerate(videos[:5]):
+            vid_writer.writerow([aid, n, vid_url, r.get("url", ""), r.get("title", "")])
 
-    # Download images in parallel using a thread pool
-    downloaded = {}  # (aid, n) -> bytes
+    readme = (
+        "CAMALEONIC CLIPPING — Bulk Export\n"
+        "==================================\n\n"
+        "Archivos incluidos:\n"
+        "  articles.csv         — todos los artículos con ID, título, fecha, sentiment y texto\n"
+        "  images_manifest.csv  — URLs de imágenes con article_id y filename sugerido\n"
+        "  videos_manifest.csv  — URLs de vídeos con article_id\n\n"
+        "Para descargar las imágenes localmente, usa el script Python incluido:\n"
+        "  python download_images.py\n"
+        "(requiere: pip install requests)\n"
+    )
 
-    def _download_all():
-        with ThreadPoolExecutor(max_workers=20) as pool:
-            futures = {
-                pool.submit(_fetch_img, img_url): (aid, n)
-                for aid, n, img_url in img_tasks
-            }
-            for fut in as_completed(futures):
-                key = futures[fut]
-                try:
-                    downloaded[key] = fut.result()
-                except Exception:
-                    pass
+    dl_script = (
+        "import csv, os, requests\n\n"
+        "os.makedirs('images', exist_ok=True)\n"
+        "with open('images_manifest.csv', encoding='utf-8-sig') as f:\n"
+        "    for row in csv.DictReader(f):\n"
+        "        try:\n"
+        "            r = requests.get(row['image_url'], timeout=10, headers={'User-Agent': 'Mozilla/5.0'})\n"
+        "            r.raise_for_status()\n"
+        "            with open(f\"images/{row['filename']}\", 'wb') as out:\n"
+        "                out.write(r.content)\n"
+        "            print(f\"OK {row['filename']}\")\n"
+        "        except Exception as e:\n"
+        "            print(f\"SKIP {row['filename']}: {e}\")\n"
+    )
 
-    if img_tasks:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _download_all)
-
-    # Build videos manifest CSV
-    vid_buf = _io.StringIO()
-    vid_writer = _csv.writer(vid_buf)
-    vid_writer.writerow(["id", "video_n", "video_url", "article_url", "title"])
-    for row_v in vid_rows:
-        vid_writer.writerow(list(row_v))
-
-    # Assemble ZIP
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("articles.csv", csv_buf.getvalue().encode("utf-8-sig"))
+        zf.writestr("articles.csv",        art_buf.getvalue().encode("utf-8-sig"))
+        zf.writestr("images_manifest.csv", img_buf.getvalue().encode("utf-8-sig"))
         zf.writestr("videos_manifest.csv", vid_buf.getvalue().encode("utf-8-sig"))
-        for aid, n, img_url in img_tasks:
-            key = (aid, n)
-            if key in downloaded:
-                fname = f"images/{aid}_{n:02d}{_ext(img_url)}"
-                zf.writestr(fname, downloaded[key])
+        zf.writestr("README.txt",          readme.encode("utf-8"))
+        zf.writestr("download_images.py",  dl_script.encode("utf-8"))
 
     zip_buf.seek(0)
     return StreamingResponse(

@@ -489,6 +489,9 @@ async function extractOne(idx, btn) {
     });
     const data = await resp.json();
     if (data.ok) {
+      // Update title/date if they were missing
+      if (data.title && !scrapeResults[idx].title) scrapeResults[idx].title = data.title;
+      if (data.date  && !scrapeResults[idx].date)  scrapeResults[idx].date  = data.date;
       scrapeResults[idx].body     = data.body;
       scrapeResults[idx].body_len = data.body_len;
       scrapeResults[idx].images   = data.images;
@@ -496,9 +499,11 @@ async function extractOne(idx, btn) {
       scrapeResults[idx].ok       = true;
       scrapeResults[idx].error    = '';
 
-      // Update chars / imgs / vids cells in the row
+      // Update cells in the row: title(1), date(2), chars(4), imgs(5), vids(6)
       const row = btn.closest('tr');
       const cells = row.querySelectorAll('td');
+      if (data.title && cells[1].textContent.trim() === '') cells[1].textContent = data.title;
+      if (data.date  && cells[2].textContent.trim() === '') cells[2].textContent = data.date;
       cells[4].textContent = data.body_len.toLocaleString('es-ES');
       cells[5].textContent = (data.images||[]).length;
       cells[6].textContent = (data.videos||[]).length;
