@@ -824,6 +824,117 @@ def fetch_site_links(url: str, css_selector: str, use_stealth: bool,
     return out, tier
 
 
+def _urllib_extract(url: str) -> dict:
+    """Fast stdlib-only extractor: urllib.request + html.parser.
+    No browser, no curl. Works for the majority of news sites that serve plain HTML.
+    Returns dict with body, title, date, images, videos."""
+    import urllib.request as _ur
+    import gzip as _gz
+    from html.parser import HTMLParser
+
+    _SKIP_TAGS  = {'script', 'style', 'nav', 'header', 'footer', 'aside',
+                   'noscript', 'iframe', 'template', 'svg', 'figure'}
+    _SKIP_IMG   = ('/logo', '/icon', '/avatar', 'sprite', '/social',
+                   '/ad/', '/ads/', '/tracking', 'blank.gif', '1x1.')
+
+    class _P(HTMLParser):
+        def __init__(self, base):
+            super().__init__(convert_charrefs=True)
+            self.base    = base
+            self.parts   : list[str] = []
+            self.imgs    : list[str] = []
+            self.vids    : list[str] = []
+            self.title   = ''
+            self.date    = ''
+            self._skip   = 0
+            self._in_title = False
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            if tag in _SKIP_TAGS:
+                self._skip += 1
+            if tag == 'title':
+                self._in_title = True
+            if tag == 'meta':
+                prop    = (a.get('property') or a.get('name') or '').lower()
+                content = (a.get('content') or '').strip()
+                if prop in ('og:title', 'twitter:title') and not self.title:
+                    self.title = content
+                if prop in ('article:published_time', 'pubdate', 'date',
+                            'dc.date', 'parsely-pub-date') and not self.date:
+                    self.date = content[:10]
+            if tag == 'time':
+                dt = (a.get('datetime') or '').strip()
+                if dt and not self.date:
+                    self.date = dt[:10]
+            if tag == 'img' and not self._skip:
+                src = (a.get('src') or '').strip()
+                if src and not src.startswith('data:'):
+                    abs_src = urljoin(self.base, src)
+                    low = abs_src.lower()
+                    w = int(a.get('width') or 0)
+                    h = int(a.get('height') or 0)
+                    if (not any(t in low for t in _SKIP_IMG)
+                            and not low.split('?')[0].endswith(('.ico', '.svg'))
+                            and not (0 < w < 80 and 0 < h < 80)):
+                        self.imgs.append(abs_src)
+            if tag in ('video', 'source'):
+                src = (a.get('src') or '').strip()
+                if src:
+                    self.vids.append(urljoin(self.base, src))
+            if tag == 'iframe':
+                src = (a.get('src') or '').strip()
+                if any(x in src for x in ('youtube', 'youtu.be', 'vimeo', 'dailymotion')):
+                    self.vids.append(urljoin(self.base, src))
+
+        def handle_endtag(self, tag):
+            if tag in _SKIP_TAGS:
+                self._skip = max(0, self._skip - 1)
+            if tag == 'title':
+                self._in_title = False
+
+        def handle_data(self, data):
+            text = data.strip()
+            if self._in_title and text and not self.title:
+                self.title = text
+            if text and not self._skip:
+                self.parts.append(text)
+
+    headers = {
+        'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection':      'keep-alive',
+    }
+    req = _ur.Request(url, headers=headers)
+    with _ur.urlopen(req, timeout=10) as resp:
+        raw = resp.read()
+        ct  = resp.headers.get('Content-Type', '')
+        ce  = resp.headers.get('Content-Encoding', '')
+        if ce == 'gzip' or (len(raw) > 2 and raw[:2] == b'\x1f\x8b'):
+            try:
+                raw = _gz.decompress(raw)
+            except Exception:
+                pass
+        charset = 'utf-8'
+        if 'charset=' in ct:
+            charset = ct.split('charset=')[-1].strip().split(';')[0].split('"')[0]
+        html = raw.decode(charset, errors='replace')
+
+    parser = _P(url)
+    parser.feed(html)
+    body = '\n'.join(parser.parts)
+    return {
+        'body':   body,
+        'title':  parser.title,
+        'date':   parser.date,
+        'images': parser.imgs[:20],
+        'videos': parser.vids[:5],
+        'tier':   0,
+    }
+
+
 def _page_title(page) -> str:
     """Extract best title from a scraped page."""
     for sel, attr in [
@@ -876,7 +987,25 @@ def _page_date(page) -> str:
 
 def fetch_article_full(url: str, use_stealth: bool = False, cookies: dict | None = None,
                        cdp_url: str | None = None, start_tier: int = 1) -> dict:
-    """Fetch article and return body text + title + date + image URLs + video URLs + tier_used."""
+    """Fetch article and return body text + title + date + image URLs + video URLs + tier_used.
+
+    Strategy (when not using stealth/CDP):
+      Tier 0  — stdlib urllib + html.parser (fast, no browser, no curl)
+      Tier 1+ — Scrapling auto-escalation (plain HTTP → headless browser → stealth browser)
+    Tier 0 is tried first; if it returns >= 300 chars of body we stop there.
+    This avoids Scrapling's internal curl timeouts for sites that serve plain HTML.
+    """
+    # ── Tier 0: fast urllib fallback (skip for stealth/CDP modes) ────────────
+    if not use_stealth and not cdp_url:
+        try:
+            fb = _urllib_extract(url)
+            if len(fb.get("body", "")) >= 300:
+                print(f"[scrape] urllib ok {url} ({len(fb['body'])} chars)")
+                return fb
+        except Exception as e:
+            print(f"[scrape] urllib failed {url}: {e}")
+
+    # ── Tiers 1-3: Scrapling ─────────────────────────────────────────────────
     page, tier = _fetch_page(url, use_stealth, cookies=cookies, cdp_url=cdp_url, start_tier=start_tier)
     if not page:
         return {"body": "", "title": "", "date": "", "images": [], "videos": [], "tier": tier}
