@@ -906,9 +906,14 @@ def _urllib_extract(url: str) -> dict:
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate',
         'Connection':      'keep-alive',
+        'Cache-Control':   'no-cache',
+        'Pragma':          'no-cache',
     }
+    import http.cookiejar as _cj
+    cookie_jar = _cj.CookieJar()
+    opener = _ur.build_opener(_ur.HTTPCookieProcessor(cookie_jar))
     req = _ur.Request(url, headers=headers)
-    with _ur.urlopen(req, timeout=10) as resp:
+    with opener.open(req, timeout=12) as resp:
         raw = resp.read()
         ct  = resp.headers.get('Content-Type', '')
         ce  = resp.headers.get('Content-Encoding', '')
@@ -920,7 +925,10 @@ def _urllib_extract(url: str) -> dict:
         charset = 'utf-8'
         if 'charset=' in ct:
             charset = ct.split('charset=')[-1].strip().split(';')[0].split('"')[0]
-        html = raw.decode(charset, errors='replace')
+        try:
+            html = raw.decode(charset, errors='replace')
+        except (LookupError, UnicodeDecodeError):
+            html = raw.decode('utf-8', errors='replace')
 
     parser = _P(url)
     parser.feed(html)
@@ -4513,6 +4521,24 @@ def export_brand_pdf(cid: int, sid: int, bid: int, days: int = 30):
 @app.get("/bulk", response_class=HTMLResponse)
 async def bulk_page(request: Request):
     return templates.TemplateResponse(request=request, name="bulk.html", context={"active_page": "bulk"})
+
+
+@app.get("/bulk/test-url")
+async def bulk_test_url(url: str):
+    """Debug: test what _urllib_extract returns for a given URL."""
+    try:
+        result = _urllib_extract(url)
+        return JSONResponse({
+            "ok": True,
+            "body_len": len(result.get("body", "")),
+            "body_preview": result.get("body", "")[:500],
+            "title": result.get("title", ""),
+            "date": result.get("date", ""),
+            "images": len(result.get("images", [])),
+            "videos": len(result.get("videos", [])),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
 
 
 @app.post("/bulk/scrape")
