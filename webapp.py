@@ -4738,36 +4738,34 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
                                  media_type="text/csv",
                                  headers={"Content-Disposition": 'attachment; filename="bulk_scrape.csv"'})
 
-    # Excel — write_only mode uses ~10× less RAM for large datasets
+    # Excel
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment
-    from openpyxl.utils import get_column_letter
 
-    wb  = openpyxl.Workbook(write_only=True)
-    ws  = wb.create_sheet("Scrape results")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Scrape results"
 
     HDR_FILL = PatternFill("solid", fgColor="0F172A")
     HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
+    ALT_FILL = PatternFill("solid", fgColor="F8FAFC")
 
     headers = ["URL", "Título", "Fecha", "Sentiment", "Chars body",
-               "Imágenes", "Vídeos", "Body (texto completo)", "Error"]
+               "Imágenes", "Vídeos", "Body (10k)", "Error"]
+    widths  = [50, 35, 14, 12, 10, 60, 60, 100, 30]
+    for ci, (h, w) in enumerate(zip(headers, widths), 1):
+        cell = ws.cell(row=1, column=ci, value=h)
+        cell.fill = HDR_FILL
+        cell.font = HDR_FONT
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+    ws.row_dimensions[1].height = 20
 
-    # Header row
-    hdr_cells = []
-    for h in headers:
-        c = openpyxl.cell.WriteOnlyCell(ws, value=h)
-        c.fill = HDR_FILL
-        c.font = HDR_FONT
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        hdr_cells.append(c)
-    ws.append(hdr_cells)
+    BODY_MAX = 10_000  # Excel hard limit is 32 767; keep file manageable
 
-    # Excel hard limit per cell is 32 767 chars; cap body at 30 000
-    BODY_MAX = 30_000
-
-    for r in rows:
-        body_text = (r.get("body") or "")[:BODY_MAX]
-        ws.append([
+    for ri, r in enumerate(rows, 2):
+        fill = ALT_FILL if ri % 2 == 0 else None
+        vals = [
             r.get("url", ""),
             r.get("title", ""),
             r.get("date", ""),
@@ -4775,9 +4773,14 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
             r.get("body_len", 0),
             " | ".join(r.get("images") or []),
             " | ".join(r.get("videos") or []),
-            body_text,
+            (r.get("body") or "")[:BODY_MAX],
             r.get("error", ""),
-        ])
+        ]
+        for ci, v in enumerate(vals, 1):
+            cell = ws.cell(row=ri, column=ci, value=v)
+            cell.alignment = Alignment(wrap_text=False, vertical="top")
+            if fill:
+                cell.fill = fill
 
     buf = io.BytesIO()
     wb.save(buf)
