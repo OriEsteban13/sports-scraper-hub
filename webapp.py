@@ -4796,6 +4796,29 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
 threading.Thread(target=scheduler_loop, daemon=True, name="scheduler").start()
 
 
+# ── Keep-alive self-ping (prevents Render free tier cold starts) ─────────────
+def _keepalive_loop():
+    """Ping own /health every 9 minutes so Render never spins the service down."""
+    import urllib.request as _ur
+    time.sleep(30)   # wait for server to be ready
+    base = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+    url  = f"{base}/health"
+    while True:
+        try:
+            _ur.urlopen(url, timeout=10)
+        except Exception:
+            pass
+        time.sleep(540)   # 9 minutes
+
+
+threading.Thread(target=_keepalive_loop, daemon=True, name="keepalive").start()
+
+
+@app.get("/health")
+async def health():
+    return JSONResponse({"status": "ok"})
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("webapp:app", host="0.0.0.0", port=8000, reload=True)
