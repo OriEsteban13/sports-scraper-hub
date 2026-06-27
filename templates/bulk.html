@@ -560,34 +560,18 @@ function esc(s) {
 }
 </script>
 
-<!-- JSZip for client-side media ZIP generation -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
-// ── Media ZIP download (client-side, no server involved) ──────────────────────
+// ── Media ZIP download (server-side, no CORS issues) ──────────────────────────
+let _mediaJobId   = null;
+let _mediaPollInt = null;
+
 async function downloadMedia() {
   if (!scrapeResults.length) return;
 
-  // Collect all image + video tasks using same filename logic as server manifest
-  const imgTasks = [];  // {aid, n, url, filename}
-  const vidRows  = [];  // csv lines
-
-  scrapeResults.forEach((r, idx) => {
-    const aid = String(idx + 1).padStart(5, '0');
-    (r.images || []).forEach((imgUrl, n) => {
-      const pathPart = imgUrl.split('?')[0];
-      const rawExt   = pathPart.split('.').pop().toLowerCase();
-      const ext      = ['jpg','jpeg','png','gif','webp','avif'].includes(rawExt) ? rawExt : 'jpg';
-      imgTasks.push({ aid, n, url: imgUrl, filename: `${aid}_${String(n).padStart(2,'0')}.${ext}` });
-    });
-    (r.videos || []).forEach((vidUrl, n) => {
-      const title = (r.title || '').replace(/"/g, '""');
-      const arUrl = (r.url   || '').replace(/"/g, '""');
-      vidRows.push(`${aid},${n},"${vidUrl}","${arUrl}","${title}"`);
-    });
-  });
-
-  if (!imgTasks.length && !vidRows.length) {
-    alert('No hay imágenes ni vídeos en los resultados actuales.\nPrimero extrae el contenido con "Extraer todo" o el botón "Extraer" por fila.');
+  const totalImgs = scrapeResults.reduce((s, r) => s + (r.images||[]).length, 0);
+  const totalVids = scrapeResults.reduce((s, r) => s + (r.videos||[]).length, 0);
+  if (!totalImgs && !totalVids) {
+    alert('No hay imágenes ni vídeos.\nPrimero extrae contenido con "Extraer todo" o el botón "Extraer" por fila.');
     return;
   }
 
@@ -597,82 +581,61 @@ async function downloadMedia() {
   const label    = document.getElementById('media-progress-label');
   const subLabel = document.getElementById('media-progress-sub');
 
-  btn.disabled   = true;
+  btn.disabled = true;
   card.style.display = 'block';
+  bar.style.width = '0%';
+  bar.style.background = '#0891b2';
+  label.textContent = 'Iniciando…';
+  subLabel.textContent = `${totalImgs} imágenes encontradas — descargando desde el servidor…`;
 
-  const total = imgTasks.length;
-  let done = 0, okCount = 0, failCount = 0;
-
-  function updateProgress() {
-    const pct = total ? Math.round(done / total * 100) : 100;
-    bar.style.width   = pct + '%';
-    label.textContent = `${done} / ${total}`;
-    subLabel.textContent = `✓ ${okCount} descargadas  ✗ ${failCount} bloqueadas por CORS`;
-  }
-  updateProgress();
-
-  if (typeof JSZip === 'undefined') {
-    alert('JSZip aún no cargado. Espera un segundo y vuelve a intentarlo.');
+  // 1. Start job
+  let jobId;
+  try {
+    const resp = await fetch('/bulk/start-media-download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({results: scrapeResults}),
+    });
+    const data = await resp.json();
+    jobId = data.job_id;
+    _mediaJobId = jobId;
+  } catch(e) {
+    alert('Error iniciando descarga: ' + e.message);
     btn.disabled = false; card.style.display = 'none';
     return;
   }
 
-  const zip       = new JSZip();
-  const imgFolder = zip.folder('images');
+  // 2. Poll status every 2s
+  _mediaPollInt = setInterval(async () => {
+    try {
+      const resp = await fetch(`/bulk/media-status/${jobId}`);
+      const job  = await resp.json();
+      const pct  = job.total ? Math.round(job.done / job.total * 100) : 100;
+      bar.style.width   = pct + '%';
+      label.textContent = `${job.done} / ${job.total}`;
+      subLabel.textContent = `✓ ${job.ok} descargadas  ✗ ${job.fail} fallidas`;
 
-  // Fetch images in parallel batches of 6
-  const BATCH = 6;
-  for (let i = 0; i < imgTasks.length; i += BATCH) {
-    await Promise.all(imgTasks.slice(i, i + BATCH).map(async task => {
-      try {
-        const resp = await fetch(task.url, { mode: 'cors', credentials: 'omit' });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const blob = await resp.blob();
-        imgFolder.file(task.filename, blob);
-        okCount++;
-      } catch (_) {
-        failCount++;
+      if (job.status === 'done') {
+        clearInterval(_mediaPollInt);
+        bar.style.width      = '100%';
+        bar.style.background = '#16a34a';
+        label.textContent    = 'Completado';
+        subLabel.textContent = `✓ ${job.ok} imágenes en ZIP  ✗ ${job.fail} no disponibles — descargando…`;
+
+        // 3. Download ZIP
+        const a = document.createElement('a');
+        a.href = `/bulk/media-zip/${jobId}`;
+        a.download = 'camaleonic_media.zip';
+        a.click();
+
+        setTimeout(() => {
+          card.style.display   = 'none';
+          bar.style.background = '#0891b2';
+          btn.disabled         = false;
+        }, 3000);
       }
-      done++;
-      updateProgress();
-    }));
-  }
-
-  // Videos manifest (we can't download video blobs efficiently)
-  if (vidRows.length) {
-    const header = 'article_id,vid_n,video_url,article_url,title';
-    zip.file('videos_manifest.csv', [header, ...vidRows].join('\n'));
-  }
-
-  // Articles index (id → url + title)
-  const artLines = ['article_id,url,title,date'];
-  scrapeResults.forEach((r, idx) => {
-    const aid   = String(idx + 1).padStart(5, '0');
-    const title = (r.title || '').replace(/"/g, '""');
-    const url   = (r.url   || '').replace(/"/g, '""');
-    const date  = (r.date  || '');
-    artLines.push(`${aid},"${url}","${title}",${date}`);
-  });
-  zip.file('articles_index.csv', artLines.join('\n'));
-
-  subLabel.textContent = 'Generando archivo ZIP…';
-
-  const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(content);
-  a.download = 'camaleonic_media.zip';
-  a.click();
-
-  subLabel.textContent = `✓ ${okCount} imágenes descargadas  ✗ ${failCount} bloqueadas por CORS`;
-  label.textContent = 'Completado';
-  bar.style.background = '#16a34a';
-
-  setTimeout(() => {
-    card.style.display = 'none';
-    bar.style.background = '#0891b2';
-    btn.disabled = false;
-    btn.innerHTML = btn.innerHTML.replace(/Media ZIP|✓.*/, 'Media ZIP');
-  }, 4000);
+    } catch(_) {}
+  }, 2000);
 }
 </script>
 {% endblock %}

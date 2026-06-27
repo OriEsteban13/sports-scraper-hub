@@ -9,7 +9,10 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
+import zipfile as _zipfile_mod
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
@@ -4789,6 +4792,142 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="bulk_scrape.xlsx"'},
+    )
+
+
+# ── Server-side media download jobs ──────────────────────────────────────────
+_MEDIA_JOBS: dict = {}          # job_id -> job dict
+_MEDIA_DIR  = Path(tempfile.gettempdir()) / "cam_media"
+_MEDIA_DIR.mkdir(exist_ok=True)
+
+
+def _media_download_worker(job_id: str, img_tasks: list, vid_rows: list,
+                            art_rows: list) -> None:
+    """Download images server-side (no CORS), build ZIP, mark job done."""
+    import urllib.request as _ur
+    import csv as _csv
+    import io as _io
+
+    job = _MEDIA_JOBS[job_id]
+    downloaded: dict[str, bytes] = {}
+
+    def _fetch(img_url: str) -> bytes:
+        req = _ur.Request(img_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer":    img_url.split("/")[0] + "//" + img_url.split("/")[2] + "/",
+        })
+        with _ur.urlopen(req, timeout=10) as r:
+            data = r.read(10 * 1024 * 1024)   # max 10 MB per image
+        return data
+
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        futures = {pool.submit(_fetch, url): (filename,) for _, _, url, filename in img_tasks}
+        for fut in as_completed(futures):
+            (filename,) = futures[fut]
+            try:
+                downloaded[filename] = fut.result()
+                job["ok"] += 1
+            except Exception:
+                job["fail"] += 1
+            job["done"] += 1
+
+    # Build ZIP
+    zip_path = _MEDIA_DIR / f"{job_id}.zip"
+    with _zipfile_mod.ZipFile(zip_path, "w", _zipfile_mod.ZIP_DEFLATED) as zf:
+        for fname, data in downloaded.items():
+            zf.writestr(f"images/{fname}", data)
+
+        # images_manifest.csv
+        img_buf = _io.StringIO()
+        img_w = _csv.writer(img_buf)
+        img_w.writerow(["article_id", "img_n", "filename", "image_url"])
+        for aid, n, url, fname in img_tasks:
+            img_w.writerow([aid, n, fname, url])
+        zf.writestr("images_manifest.csv", img_buf.getvalue().encode("utf-8-sig"))
+
+        # videos_manifest.csv
+        vid_buf = _io.StringIO()
+        vid_w = _csv.writer(vid_buf)
+        vid_w.writerow(["article_id", "vid_n", "video_url", "article_url", "title"])
+        for row in vid_rows:
+            vid_w.writerow(row)
+        zf.writestr("videos_manifest.csv", vid_buf.getvalue().encode("utf-8-sig"))
+
+        # articles_index.csv
+        art_buf = _io.StringIO()
+        art_w = _csv.writer(art_buf)
+        art_w.writerow(["article_id", "url", "title", "date"])
+        for row in art_rows:
+            art_w.writerow(row)
+        zf.writestr("articles_index.csv", art_buf.getvalue().encode("utf-8-sig"))
+
+    job["zip_path"] = str(zip_path)
+    job["status"]   = "done"
+
+
+@app.post("/bulk/start-media-download")
+async def start_media_download(request: Request):
+    """Kick off a background server-side image download job."""
+    body_bytes = await request.body()
+    data = json.loads(body_bytes)
+    results = data.get("results", [])
+
+    img_tasks: list[tuple] = []   # (aid, n, url, filename)
+    vid_rows:  list[list]  = []
+    art_rows:  list[list]  = []
+
+    for idx, r in enumerate(results):
+        aid    = f"{idx + 1:05d}"
+        images = r.get("images") or []
+        videos = r.get("videos") or []
+        title  = r.get("title", "")
+        url    = r.get("url", "")
+        date   = r.get("date", "")
+        art_rows.append([aid, url, title, date])
+        for n, img_url in enumerate(images[:20]):
+            _, ext = os.path.splitext(urlparse(img_url).path)
+            ext = ext.lower() if ext.lower() in {".jpg",".jpeg",".png",".gif",".webp",".avif"} else ".jpg"
+            img_tasks.append((aid, n, img_url, f"{aid}_{n:02d}{ext}"))
+        for n, vid_url in enumerate(videos[:5]):
+            vid_rows.append([aid, n, vid_url, url, title])
+
+    job_id = uuid.uuid4().hex[:10]
+    _MEDIA_JOBS[job_id] = {
+        "status": "running",
+        "total":  len(img_tasks),
+        "done":   0,
+        "ok":     0,
+        "fail":   0,
+        "zip_path": None,
+    }
+    threading.Thread(
+        target=_media_download_worker,
+        args=(job_id, img_tasks, vid_rows, art_rows),
+        daemon=True,
+        name=f"media-{job_id}",
+    ).start()
+
+    return JSONResponse({"job_id": job_id, "total": len(img_tasks)})
+
+
+@app.get("/bulk/media-status/{job_id}")
+async def media_status(job_id: str):
+    job = _MEDIA_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return JSONResponse(job)
+
+
+@app.get("/bulk/media-zip/{job_id}")
+async def media_zip_download(job_id: str):
+    from fastapi.responses import FileResponse
+    job = _MEDIA_JOBS.get(job_id)
+    if not job or job["status"] != "done" or not job.get("zip_path"):
+        raise HTTPException(404, "ZIP not ready")
+    return FileResponse(
+        job["zip_path"],
+        media_type="application/zip",
+        filename="camaleonic_media.zip",
     )
 
 
