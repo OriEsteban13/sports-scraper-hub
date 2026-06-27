@@ -107,7 +107,27 @@
         <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         ZIP
       </button>
+      <button id="download-media-btn" onclick="downloadMedia()" class="btn-ghost"
+              style="font-size:12px;padding:5px 10px;border-color:#0891b2;color:#0e7490">
+        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+        Media ZIP
+      </button>
     </div>
+  </div>
+
+  <!-- Media download progress bar (hidden by default) -->
+  <div id="media-progress-card" class="card" style="max-width:100%;margin-bottom:12px;padding:14px 20px;display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:13px;font-weight:600;color:#111827">Descargando imágenes…</span>
+      <span id="media-progress-label" style="font-size:12px;color:#6b7280">0 / 0</span>
+    </div>
+    <div style="height:6px;background:#f1f5f9;border-radius:999px;overflow:hidden">
+      <div id="media-progress-bar" style="height:100%;background:#0891b2;width:0%;transition:width .2s;border-radius:999px"></div>
+    </div>
+    <div id="media-progress-sub" style="font-size:11px;color:#9ca3af;margin-top:6px"></div>
   </div>
 
   <div class="card" style="overflow:auto">
@@ -537,6 +557,122 @@ async function extractOne(idx, btn) {
 
 function esc(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+
+<!-- JSZip for client-side media ZIP generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+// ── Media ZIP download (client-side, no server involved) ──────────────────────
+async function downloadMedia() {
+  if (!scrapeResults.length) return;
+
+  // Collect all image + video tasks using same filename logic as server manifest
+  const imgTasks = [];  // {aid, n, url, filename}
+  const vidRows  = [];  // csv lines
+
+  scrapeResults.forEach((r, idx) => {
+    const aid = String(idx + 1).padStart(5, '0');
+    (r.images || []).forEach((imgUrl, n) => {
+      const pathPart = imgUrl.split('?')[0];
+      const rawExt   = pathPart.split('.').pop().toLowerCase();
+      const ext      = ['jpg','jpeg','png','gif','webp','avif'].includes(rawExt) ? rawExt : 'jpg';
+      imgTasks.push({ aid, n, url: imgUrl, filename: `${aid}_${String(n).padStart(2,'0')}.${ext}` });
+    });
+    (r.videos || []).forEach((vidUrl, n) => {
+      const title = (r.title || '').replace(/"/g, '""');
+      const arUrl = (r.url   || '').replace(/"/g, '""');
+      vidRows.push(`${aid},${n},"${vidUrl}","${arUrl}","${title}"`);
+    });
+  });
+
+  if (!imgTasks.length && !vidRows.length) {
+    alert('No hay imágenes ni vídeos en los resultados actuales.\nPrimero extrae el contenido con "Extraer todo" o el botón "Extraer" por fila.');
+    return;
+  }
+
+  const btn      = document.getElementById('download-media-btn');
+  const card     = document.getElementById('media-progress-card');
+  const bar      = document.getElementById('media-progress-bar');
+  const label    = document.getElementById('media-progress-label');
+  const subLabel = document.getElementById('media-progress-sub');
+
+  btn.disabled   = true;
+  card.style.display = 'block';
+
+  const total = imgTasks.length;
+  let done = 0, okCount = 0, failCount = 0;
+
+  function updateProgress() {
+    const pct = total ? Math.round(done / total * 100) : 100;
+    bar.style.width   = pct + '%';
+    label.textContent = `${done} / ${total}`;
+    subLabel.textContent = `✓ ${okCount} descargadas  ✗ ${failCount} bloqueadas por CORS`;
+  }
+  updateProgress();
+
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip aún no cargado. Espera un segundo y vuelve a intentarlo.');
+    btn.disabled = false; card.style.display = 'none';
+    return;
+  }
+
+  const zip       = new JSZip();
+  const imgFolder = zip.folder('images');
+
+  // Fetch images in parallel batches of 6
+  const BATCH = 6;
+  for (let i = 0; i < imgTasks.length; i += BATCH) {
+    await Promise.all(imgTasks.slice(i, i + BATCH).map(async task => {
+      try {
+        const resp = await fetch(task.url, { mode: 'cors', credentials: 'omit' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        imgFolder.file(task.filename, blob);
+        okCount++;
+      } catch (_) {
+        failCount++;
+      }
+      done++;
+      updateProgress();
+    }));
+  }
+
+  // Videos manifest (we can't download video blobs efficiently)
+  if (vidRows.length) {
+    const header = 'article_id,vid_n,video_url,article_url,title';
+    zip.file('videos_manifest.csv', [header, ...vidRows].join('\n'));
+  }
+
+  // Articles index (id → url + title)
+  const artLines = ['article_id,url,title,date'];
+  scrapeResults.forEach((r, idx) => {
+    const aid   = String(idx + 1).padStart(5, '0');
+    const title = (r.title || '').replace(/"/g, '""');
+    const url   = (r.url   || '').replace(/"/g, '""');
+    const date  = (r.date  || '');
+    artLines.push(`${aid},"${url}","${title}",${date}`);
+  });
+  zip.file('articles_index.csv', artLines.join('\n'));
+
+  subLabel.textContent = 'Generando archivo ZIP…';
+
+  const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(content);
+  a.download = 'camaleonic_media.zip';
+  a.click();
+
+  subLabel.textContent = `✓ ${okCount} imágenes descargadas  ✗ ${failCount} bloqueadas por CORS`;
+  label.textContent = 'Completado';
+  bar.style.background = '#16a34a';
+
+  setTimeout(() => {
+    card.style.display = 'none';
+    bar.style.background = '#0891b2';
+    btn.disabled = false;
+    btn.innerHTML = btn.innerHTML.replace(/Media ZIP|✓.*/, 'Media ZIP');
+  }, 4000);
 }
 </script>
 {% endblock %}
