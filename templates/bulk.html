@@ -367,19 +367,51 @@ function showArticle(idx) {
   document.getElementById('article-modal').style.display = 'flex';
 }
 
-async function exportResults(fmt) {
+function exportResults(fmt) {
   if (!scrapeResults.length) return;
-  const resp = await fetch(`/bulk/export?fmt=${fmt}`, {
+
+  if (fmt === 'csv') {
+    // Generate CSV entirely client-side — avoids sending huge JSON to server
+    const fields = ['url','title','date','sentiment','body_len','images','videos','body','error'];
+    const escape = v => {
+      const s = (v == null ? '' : String(v)).replace(/"/g, '""');
+      return /[",\n\r]/.test(s) ? `"${s}"` : s;
+    };
+    const lines = [fields.join(',')];
+    for (const r of scrapeResults) {
+      lines.push([
+        escape(r.url), escape(r.title), escape(r.date), escape(r.sentiment),
+        escape(r.body_len), escape((r.images||[]).join(' | ')),
+        escape((r.videos||[]).join(' | ')), escape(r.body||''), escape(r.error||'')
+      ].join(','));
+    }
+    const blob = new Blob(['﻿' + lines.join('\n')], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'bulk_scrape.csv';
+    a.click();
+    return;
+  }
+
+  // Excel: send to server but truncate body to 2000 chars to keep payload small
+  const slim = scrapeResults.map(r => ({
+    ...r,
+    body: (r.body||'').slice(0, 2000),
+    images: (r.images||[]).slice(0, 30),
+    videos: (r.videos||[]).slice(0, 10),
+  }));
+  fetch('/bulk/export?fmt=excel', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({results: scrapeResults}),
+    body: JSON.stringify({results: slim}),
+  }).then(async resp => {
+    if (!resp.ok) { alert('Error generando Excel: ' + resp.status); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'bulk_scrape.xlsx';
+    a.click();
   });
-  const blob = await resp.blob();
-  const ext  = fmt === 'csv' ? 'csv' : 'xlsx';
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = `bulk_scrape.${ext}`;
-  a.click();
 }
 
 function resetAll() {

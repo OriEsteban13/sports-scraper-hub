@@ -4754,7 +4754,7 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
     ALT_FILL = PatternFill("solid", fgColor="F8FAFC")
 
     headers = ["URL", "Título", "Fecha", "Sentiment", "Chars body",
-               "Imágenes", "Vídeos", "Body (10k)", "Error"]
+               "Imágenes", "Vídeos", "Body (2k)", "Error"]
     widths  = [50, 35, 14, 12, 10, 60, 60, 100, 30]
     for ci, (h, w) in enumerate(zip(headers, widths), 1):
         cell = ws.cell(row=1, column=ci, value=h)
@@ -4764,7 +4764,7 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
         ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
     ws.row_dimensions[1].height = 20
 
-    BODY_MAX = 10_000  # Excel hard limit is 32 767; keep file manageable
+    BODY_MAX = 2_000  # client already truncates; server enforces same cap
 
     for ri, r in enumerate(rows, 2):
         fill = ALT_FILL if ri % 2 == 0 else None
@@ -4785,11 +4785,19 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
             if fill:
                 cell.fill = fill
 
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    import tempfile as _tf, os as _os
+    tmp = _tf.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
+    wb.save(tmp.name)
+    def _iter_and_delete(path):
+        try:
+            with open(path, "rb") as f:
+                while chunk := f.read(65536):
+                    yield chunk
+        finally:
+            _os.unlink(path)
     return StreamingResponse(
-        buf,
+        _iter_and_delete(tmp.name),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="bulk_scrape.xlsx"'},
     )
