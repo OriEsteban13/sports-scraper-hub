@@ -4600,14 +4600,18 @@ async def bulk_scrape(request: Request, file: UploadFile = File(None),
 
 @app.post("/bulk/extract-one")
 async def bulk_extract_one(request: Request):
-    """Extract full content (body, images, videos) for a single URL."""
+    """Extract full content (body, images, videos) for a single URL.
+    Uses run_in_executor so fetch_article_full runs in a thread — multiple
+    concurrent requests run in parallel instead of queuing the event loop."""
     data = await request.json()
     url = (data.get("url") or "").strip()
     stealth = bool(data.get("stealth", False))
     if not url:
         return JSONResponse({"ok": False, "error": "No URL provided"})
     try:
-        full = fetch_article_full(url, stealth)
+        import asyncio, functools
+        loop = asyncio.get_event_loop()
+        full = await loop.run_in_executor(None, functools.partial(fetch_article_full, url, stealth))
         return JSONResponse({
             "ok":     True,
             "title":  full.get("title", ""),

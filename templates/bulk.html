@@ -437,7 +437,7 @@ async function extractAll() {
   btn.disabled = true;
 
   const stealth = document.getElementById('use-stealth').checked;
-  const CONCURRENCY = 3;
+  const CONCURRENCY = 1;  // Render free tier: sequential to avoid 502 timeouts
   let queue = [];
   for (let i = 0; i < scrapeResults.length; i++) {
     const rowBtn = document.getElementById(`extract-btn-${i}`);
