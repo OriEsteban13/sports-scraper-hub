@@ -4741,34 +4741,20 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
                                  media_type="text/csv",
                                  headers={"Content-Disposition": 'attachment; filename="bulk_scrape.csv"'})
 
-    # Excel
-    import openpyxl
-    from openpyxl.styles import PatternFill, Font, Alignment
+    # Excel — write_only streams rows directly to disk: constant RAM regardless of row count
+    import openpyxl, tempfile as _tf, os as _os
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Scrape results"
+    tmp = _tf.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
 
-    HDR_FILL = PatternFill("solid", fgColor="0F172A")
-    HDR_FONT = Font(color="FFFFFF", bold=True, size=10)
-    ALT_FILL = PatternFill("solid", fgColor="F8FAFC")
+    BODY_MAX = 2_000
 
-    headers = ["URL", "Título", "Fecha", "Sentiment", "Chars body",
-               "Imágenes", "Vídeos", "Body (2k)", "Error"]
-    widths  = [50, 35, 14, 12, 10, 60, 60, 100, 30]
-    for ci, (h, w) in enumerate(zip(headers, widths), 1):
-        cell = ws.cell(row=1, column=ci, value=h)
-        cell.fill = HDR_FILL
-        cell.font = HDR_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
-    ws.row_dimensions[1].height = 20
-
-    BODY_MAX = 2_000  # client already truncates; server enforces same cap
-
-    for ri, r in enumerate(rows, 2):
-        fill = ALT_FILL if ri % 2 == 0 else None
-        vals = [
+    wb = openpyxl.Workbook(write_only=True)
+    ws = wb.create_sheet("Scrape results")
+    ws.append(["URL", "Título", "Fecha", "Sentiment", "Chars body",
+               "Imágenes", "Vídeos", "Body (2k)", "Error"])
+    for r in rows:
+        ws.append([
             r.get("url", ""),
             r.get("title", ""),
             r.get("date", ""),
@@ -4778,24 +4764,20 @@ async def bulk_export(request: Request, fmt: str = Form("excel")):
             " | ".join(r.get("videos") or []),
             (r.get("body") or "")[:BODY_MAX],
             r.get("error", ""),
-        ]
-        for ci, v in enumerate(vals, 1):
-            cell = ws.cell(row=ri, column=ci, value=v)
-            cell.alignment = Alignment(wrap_text=False, vertical="top")
-            if fill:
-                cell.fill = fill
-
-    import tempfile as _tf, os as _os
-    tmp = _tf.NamedTemporaryFile(delete=False, suffix=".xlsx")
-    tmp.close()
+        ])
     wb.save(tmp.name)
+
     def _iter_and_delete(path):
         try:
             with open(path, "rb") as f:
-                while chunk := f.read(65536):
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
                     yield chunk
         finally:
             _os.unlink(path)
+
     return StreamingResponse(
         _iter_and_delete(tmp.name),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
