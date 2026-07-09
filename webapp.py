@@ -142,7 +142,7 @@ class _PgCursor:
 class _PgConnection:
     """psycopg2 connection with a sqlite3-compatible surface."""
     def __init__(self, dsn: str):
-        self._conn = psycopg2.connect(dsn)
+        self._conn = psycopg2.connect(dsn, connect_timeout=10)
 
     # Convert SQLite SQL dialects to PostgreSQL on the fly
     @staticmethod
@@ -509,7 +509,10 @@ COUNTRIES = [
 COUNTRY_BY_CODE = {c: (n, f) for c, n, f in COUNTRIES}
 
 
-init_db()
+try:
+    init_db()
+except Exception as _db_init_err:
+    print(f"[startup] DB init warning: {_db_init_err} — continuing", flush=True)
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -4925,10 +4928,6 @@ async def media_zip_download(job_id: str):
     )
 
 
-# Start the scheduler thread (daemon so it dies with the process)
-threading.Thread(target=scheduler_loop, daemon=True, name="scheduler").start()
-
-
 # ── Keep-alive self-ping (prevents Render free tier cold starts) ─────────────
 def _keepalive_loop():
     """Ping own /health every 9 minutes so Render never spins the service down."""
@@ -4944,7 +4943,13 @@ def _keepalive_loop():
         time.sleep(540)   # 9 minutes
 
 
-threading.Thread(target=_keepalive_loop, daemon=True, name="keepalive").start()
+@app.on_event("startup")
+async def _on_startup():
+    """Start background threads AFTER uvicorn has opened the port.
+    This prevents long DB/network init from blocking Render's port scan."""
+    threading.Thread(target=scheduler_loop, daemon=True, name="scheduler").start()
+    threading.Thread(target=_keepalive_loop, daemon=True, name="keepalive").start()
+    print("[startup] background threads started", flush=True)
 
 
 @app.get("/health")
